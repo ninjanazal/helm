@@ -1,18 +1,20 @@
 {
-  "name": "team-chat",
+  "name": "helm",
   "version": "0.1.0",
-  "description": "Run a fixed team of subagents from a mission-control pane: member cards, live status, team channel and DMs.",
+  "description": "Steer Claude Code sessions: a live deck pane (context, limits, drift, savings), a prompt builder, guardrails, and atlas, a local code graph.",
   "license": "MIT",
   "types": "./types/index.d.ts",
   "author": {
     "name": "Eurico Martins"
   },
-  "repository": "https://github.com/ninjanazal/team-chat",
+  "repository": "https://github.com/ninjanazal/helm",
   "keywords": [
     "agents",
     "team",
     "subagents",
     "pane",
-    "orchestration"
+    "orchestration",
+    "code-search",
+    "prompts"
   ]
 }

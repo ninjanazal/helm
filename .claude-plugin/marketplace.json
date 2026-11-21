@@ -1,12 +1,12 @@
 {
-  "name": "team-chat",
+  "name": "helm",
   "owner": { "name": "Eurico Martins" },
   "description": "Claude Code plugins by Eurico Martins.",
   "plugins": [
     {
-      "name": "team-chat",
+      "name": "helm",
       "source": "./",
-      "description": "Run fixed teams of Claude Code subagents from a mission-control pane."
+      "description": "Steer Claude Code sessions: a live deck pane (context, limits, drift, savings), a prompt builder, guardrails, and atlas, a local code graph."
     }
   ]
 }

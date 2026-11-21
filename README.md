@@ -1,48 +1,52 @@
-# 💬 team-chat
+# ⎈ helm
 
-> Mission control for a fixed team of Claude Code subagents, in a pane beside your chat.
+> Steer your Claude Code sessions: see what they cost and when they drift, write better prompts, and find code without reading whole files.
 
-Each member (lead, backend, frontend, qa, …) is a real agent type with its own role, model and effort. The pane shows one card per member with a live, animated status: a spinner while working, a pulsing ◆ when it needs help, a sparkle then ✓ when done. Cards also show current activity, steps and elapsed time, and a `#team` feed records every task and message.
+helm is a Claude Code plugin plus **atlas**, a local code graph:
+
+- **Deck pane:** the session's health beside the chat. It shows the task, a drift meter (time for a fresh session?), context and 5h limit bars with the pace to the limit, tokens, cost, cache hits, tokens saved by atlas, and a live feed of tool calls. It animates only while a turn runs.
+- **`/helm:prompt`:** turns a rough request into a complete, checkable prompt (goal, grounded context, scope, acceptance checks, stop conditions) before any work starts.
+- **Guardrails:** refuses risky commands (`git push`, `rm -rf`, `git stash`, …) for subagents, with labelled exits and runtime acceptance checks.
+- **atlas** (`atlas/`, Rust): indexes code in 12 languages (GDScript included) plus docs and config into `.atlas/graph.db`. It answers `find`, `symbol`, `neighbors` and `outline` over MCP with `path:lines`, not whole files. No services or models are needed.
+- Optional companions: **superpowers** (workflow skills) and **herdr** (agent-aware terminal).
 
 ## 📦 Install
 
-At the prompt of a terminal session:
-
 ```
-/plugin install team-chat --marketplace ninjanazal/team-chat
-```
-
-From a shell:
-
-```
-claude plugin install team-chat --marketplace ninjanazal/team-chat
+make local     # this project only: plugin, superpowers, atlas + index
+make global    # every project
+make doctor    # what is installed, and where
 ```
 
-Answer `y` to add the marketplace, then pick a scope. In the desktop app: + next to the prompt box → Plugins → Add marketplace `ninjanazal/team-chat` → Add plugin.
+Every piece can be installed or removed on its own, per scope: `make <piece>` / `make <piece>-remove` with `SCOPE=local|user` (pieces: `plugin`, `superpowers`, `atlas`, `index`). Then run `/reload-plugins` and `/deck` in Claude Code.
 
-Or run the script in this repo:
+From GitHub, without cloning: `/plugin install helm --marketplace ninjanazal/helm`.
 
-```
-./plugin.sh
-```
+## 🧭 Deck
 
-It asks whether to install, update or remove, then where: **system** (every project on this machine) or **local** (one project, just for you). Restart Claude Code after installing or updating.
+- `/deck` opens the pane; `/deck task <text>` re-anchors the task (and resets drift); `/deck reset` clears it.
+- Drift = 0.4 × context fill + 0.4 × topic shift (new terms vs. the task's first prompt) + 0.2 × turns/60. At 0.70 it suggests a fresh session.
+- Every number comes from the engine, git or `atlas stats --json`; cost is the engine's own estimate.
 
-## 🚀 Quick start
+## 👥 Teams (legacy)
 
-1. `/team-chat:create what it's for`: Claude looks at your project, interviews you briefly, proposes a team and saves it once you approve.
-2. `/team on` (or `/team-chat:start`): opens the pane.
+The earlier team mode (fixed job members in a pane, `/team on`) still ships while it's being phased out:
+
+### Quick start
+
+1. `/helm:create what it's for`: Claude looks at your project, interviews you briefly, proposes a team and saves it once you approve.
+2. `/team on` (or `/helm:start`): opens the pane.
 3. Give the lead a task in the main chat. It splits the work and starts members in the background.
 4. Talk to anyone with `@backend …`.
 
-## 🧭 Commands
+### 🧭 Commands
 
 | Command | What it does |
 | --- | --- |
-| `/team-chat:create [purpose]` | Design and save a new team |
-| `/team-chat:start [team]` | Make a team active and open the pane |
-| `/team-chat:janitor [operation]` | List, inspect, rename, delete, duplicate, edit teams and members, prune files, fix a broken team file. Asks before anything destructive |
-| `/team-chat:help`, `/team help`, **? help** | The full guide |
+| `/helm:create [purpose]` | Design and save a new team |
+| `/helm:start [team]` | Make a team active and open the pane |
+| `/helm:janitor [operation]` | List, inspect, rename, delete, duplicate, edit teams and members, prune files, fix a broken team file. Asks before anything destructive |
+| `/helm:help`, `/team help`, **? help** | The full guide |
 | `/team on` / `/team off` | Turn the team view on or off |
 | `/team <name>` / `/team list` | Open a team / list teams |
 | `/team new <team> [from]` | Create a team, empty or copied |
@@ -55,17 +59,17 @@ It asks whether to install, update or remove, then where: **system** (every proj
 | `/team files` | Open the shared files |
 | `/team queue <member\|any> <task>` | Queue a task; `/team queue` lists, `/team queue rm #<id>` removes |
 
-## 🔌 On/off
+### 🔌 On/off
 
 The team view is **off by default**. A session is a plain Claude Code chat (no team prompt, no `@member` routing, no queue, no pane), even in a project that already has teams.
 
 - `/team on` reloads the last team, opens the pane and remembers the choice per project, so `/new` and `/clear` stay on.
-- `/team <name>`, `/team-chat:start` and `/team-chat:create` also turn it on.
+- `/team <name>`, `/helm:start` and `/helm:create` also turn it on.
 - `/team off` turns it off and closes the pane.
-- `TEAM_CHAT=on claude` launches with it on (not stored).
+- `HELM=on claude` launches with it on (not stored).
 - `/team`, `/team list` and `/team help` work while it is off.
 
-## 🖥️ The pane
+### 🖥️ The pane
 
 - 🗂️ **Tabs:** **Overview** (cards and receipt, with a ⚑N badge for members needing help or you), **Chain**, **Files**. The pane remembers the tab.
 - 🃏 **Cards:** each shows `model · effort · ctx · out · steps`. `ctx` is the latest request's input tokens, `out` the output tokens; a `max_tokens` stop shows in red.
@@ -75,7 +79,7 @@ The team view is **off by default**. A session is a plain Claude Code chat (no t
 - 📜 **Scrolling:** the mouse wheel scrolls; with the pane focused, so do the arrow and page keys. On Chat, **↓ latest** jumps to the newest message.
 - 🔀 **Pick a team:** `/team` asks which one when there are several. The last team is remembered per project, and a lone team loads automatically. **⇄ switch** works only while no member is working (otherwise it reads "⇄ switch (busy)").
 
-## 🚩 Flags
+### 🚩 Flags
 
 - **⚑ needs you** appears when:
   - a member asks for permission (its tool check returns `ask`, or a permission dialog opens for it) and the same call is still pending after about 1.5 seconds, so a call that runs at once never flashes it;
@@ -91,26 +95,26 @@ Good to know:
 - No flag in `bypassPermissions` or `dontAsk` (the mode settles the ask). In `auto` a plain ask is settled by the classifier, but a hard ask (such as the read-outside-working-directory block) still flags. Skipped asks are noted in the log.
 - After a denied ask, the flag stays until the member's next tool call or the end of its turn. It is matched on the tool call id, falling back to the tool name.
 
-## 🗣️ Talking to the team
+### 🗣️ Talking to the team
 
 - **Give the lead a task** in the main chat. Your main session is the lead. If the team sets a **main** member, untargeted prompts go to it instead.
 - **Talk to a member** with `@backend …` (or **✉ message** on its card). It is resumed or started. `@lead …` reaches your main session.
 - **Members never spawn agents.** Only the lead starts members; a member reaches a teammate by name with SendMessage. The Agent tool is removed only when a member's entry has an explicit `tools` list. Otherwise the rule lives in its brief only, because the plugin cannot exclude a single tool.
 - **`/new` and `/clear`** keep the active team, and the lead is told about it again.
 
-## 📋 Queue
+### 📋 Queue
 
 Read-only tab showing all member work in three groups: **Active** (running now, flagged ones included), **Queued** and **Done**. Each group shows what fits, with `+N more` when rows are cut and `N hidden` when a group does not fit.
 
 Add tasks with `/team queue <member|any> <task>`. A task is sent when its member is idle or done, never to one that needs help or you. The lead cannot be queued: give it work in the chat.
 
-## 📝 Member briefs and summaries
+### 📝 Member briefs and summaries
 
 Each member has a brief: its **purpose**, **responsibilities**, **how it works**, **boundaries** (what it must never do) and when it is **done**. The brief becomes its instructions.
 
 Each card shows the member's **task** and a live **now** line: a one-sentence summary written by Haiku from its latest actions at most every 20 seconds while it works (billed to your account like any model call), and the first line of its report once done.
 
-## 📁 Shared team files
+### 📁 Shared team files
 
 Members and the lead keep plans, specs, decisions, API contracts and handoff notes as **team files** in `.claude/teams/<team>/files/`, through three tools: `write_file` (replace or append, with a one-line note), `read_file` and `list_files`. Every brief tells the member to check them before starting and to save anything a teammate or a later session will need. Members with restricted tools still get these three.
 
@@ -118,7 +122,7 @@ Members and the lead keep plans, specs, decisions, API contracts and handoff not
 - **📁 files** in the header (or `/team files`) lists them, newest first; click one to read it.
 - They are ordinary files in your project: they persist across sessions and you share them by committing. Hand edits and `git pull`s show up within a second.
 
-## 👥 Teams and members
+### 👥 Teams and members
 
 Teams live in `.claude/teams/<team>/team.json` (an older `.claude/team.json` is picked up too). With no team, the plugin asks whether to create one.
 
@@ -139,12 +143,12 @@ The **Chain** tab draws a tree from you (the lead) with `├─` / `└─` conn
 
 A team can also name one member as **`main`** (a team-level field). Prompts without an `@` target go to it; `@member …` still goes to any member. Leave it out and your main session handles them.
 
-Set these with `/team-chat:create` or `/team-chat:janitor`, or by hand. Invalid values are rejected when saving; on a hand edit they are dropped with a warning in `#team`. Every change is posted in `#team` and told to the lead.
+Set these with `/helm:create` or `/helm:janitor`, or by hand. Invalid values are rejected when saving; on a hand edit they are dropped with a warning in `#team`. Every change is posted in `#team` and told to the lead.
 
 ## 🛠️ Developing
 
 ```
 claude --plugin-dir .       # run it from this folder
-claude plugin test .        # run the tests
+make test                   # run the tests (claude plugin test .)
 claude plugin validate .    # check it
 ```

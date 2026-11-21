@@ -1,0 +1,160 @@
+{
+  "name": "jobs",
+  "members": [
+    {
+      "name": "lead",
+      "role": "Team lead",
+      "emoji": "🧭",
+      "model": "inherit",
+      "effort": "high",
+      "isLead": true,
+      "color": "claude",
+      "description": "Your main session.",
+      "purpose": "Turn the request into a plan, assign the parts, and deliver one checked result.",
+      "prompt": ""
+    },
+    {
+      "name": "finder",
+      "role": "Find code",
+      "emoji": "🔎",
+      "color": "cyan",
+      "model": "haiku",
+      "effort": "low",
+      "description": "Hand it any 'where is X / what handles Y' question about the codebase.",
+      "purpose": "Locate the code that answers a question and return path:lines with a one-line reason each.",
+      "responsibilities": "",
+      "approach": "",
+      "boundaries": "",
+      "doneWhen": "",
+      "prompt": "",
+      "kind": "read",
+      "specificity": "procedural",
+      "scope": {
+        "write": []
+      },
+      "output": "JSON {\"hits\": [{\"path\": \"...\", \"lines\": \"12-30\", \"why\": \"one line\"}]}",
+      "procedure": [
+        "Pick 2-4 identifiers or phrases from the question.",
+        "Grep and Glob for them; Read only the matching line ranges, never whole files.",
+        "Quote the line that proves each hit.",
+        "Return at most 10 hits, best first."
+      ],
+      "acceptance": [
+        {
+          "check": "report"
+        },
+        {
+          "check": "paths_exist"
+        }
+      ],
+      "stop": {
+        "tokens": 20000,
+        "turns": 8
+      },
+      "tools": [
+        "Read",
+        "Grep",
+        "Glob"
+      ]
+    },
+    {
+      "name": "fixer",
+      "role": "Make a change",
+      "emoji": "🔧",
+      "color": "green",
+      "model": "sonnet",
+      "effort": "medium",
+      "description": "Hand it one change with a clear objective, the files it may touch and acceptance criteria.",
+      "purpose": "Make one scoped code change and prove it with the plugin tests.",
+      "responsibilities": "",
+      "approach": "",
+      "boundaries": "",
+      "doneWhen": "",
+      "prompt": "",
+      "kind": "write",
+      "specificity": "procedural",
+      "scope": {
+        "write": [
+          "hooks/**",
+          "types/**",
+          "skills/**",
+          "README.md",
+          "Makefile",
+          ".dev/**"
+        ]
+      },
+      "output": "Summary of the change, with files and line ranges.",
+      "procedure": [
+        "Restate the objective and acceptance in one line each; if either is unclear, stop with exit blocked.",
+        "Read the relevant code (ask finder via SendMessage if you don't know where it is).",
+        "Make the smallest change that meets the acceptance.",
+        "Run make test and compare with the baseline of 0 failures.",
+        "Fix only failures you caused."
+      ],
+      "acceptance": [
+        {
+          "check": "report"
+        },
+        {
+          "check": "command",
+          "run": "make test",
+          "timeoutMs": 300000,
+          "maxFailures": 0
+        }
+      ],
+      "stop": {
+        "tokens": 80000,
+        "turns": 25,
+        "fixAttempts": 2
+      },
+      "handsTo": [
+        "checker"
+      ]
+    },
+    {
+      "name": "checker",
+      "role": "Verify a change",
+      "emoji": "✅",
+      "color": "yellow",
+      "model": "haiku",
+      "effort": "low",
+      "description": "Hand it a finished change from fixer, with the acceptance criteria.",
+      "purpose": "Check a finished change against its acceptance criteria and the diff, and report pass or fail with evidence.",
+      "responsibilities": "",
+      "approach": "",
+      "boundaries": "",
+      "doneWhen": "",
+      "prompt": "",
+      "kind": "verify",
+      "specificity": "procedural",
+      "scope": {
+        "write": []
+      },
+      "output": "JSON {\"verdict\": \"pass|fail\", \"criteria\": [{\"text\": \"...\", \"ok\": true, \"evidence\": \"path:lines\"}], \"out_of_scope\": []}",
+      "procedure": [
+        "Read git diff for the changed files.",
+        "Check each acceptance criterion against the diff; cite path:lines.",
+        "Run make test and compare with the baseline of 0 failures.",
+        "Flag changes outside the stated objective."
+      ],
+      "acceptance": [
+        {
+          "check": "report"
+        },
+        {
+          "check": "paths_exist"
+        }
+      ],
+      "stop": {
+        "tokens": 30000,
+        "turns": 10
+      },
+      "tools": [
+        "Read",
+        "Grep",
+        "Glob",
+        "Bash"
+      ]
+    }
+  ]
+}

@@ -15,6 +15,21 @@ export type Member = {
   approach?: string
   boundaries?: string
   doneWhen?: string
+  /** Contract (spec .dev/member-spec.md), all optional so old teams load. read members may run in parallel; one writer per scope. */
+  kind?: 'read' | 'write' | 'verify'
+  /** procedural: numbered steps behind a plan; principled: guidance only (open-ended judgement). */
+  specificity?: 'procedural' | 'principled'
+  /** Globs relative to the project root. scope.write is enforced: edits outside it are refused. */
+  scope?: { read?: string[]; write?: string[] }
+  /** The shape of the report's "result". */
+  output?: string
+  procedure?: string[]
+  acceptance?: Acceptance[]
+  stop?: { tokens?: number; turns?: number; noProgress?: number; fixAttempts?: number }
+  /** progress: long-lived, keeps a progress file and resumes from it. */
+  state?: 'none' | 'progress'
+  /** Git actions it may take (denied by default). */
+  allow?: ('commit' | 'push')[]
   /** Handle of the member it answers to. Missing means the lead. Never set on the lead. */
   reportsTo?: string
   /** Handles that receive its finished work, in order. May include the lead. Missing or [] means none. */
@@ -68,6 +83,9 @@ export type Live = {
   /** For a permission flag: the pending call's tool_use_id (when the engine gave one) and tool name. */
   flagCall?: string
   flagTool?: string
+  /** The runtime's exit for the last finished task, and the acceptance checks behind it. */
+  exit?: ExitReason
+  checks?: string
 }
 
 /** One line of the event log. */
@@ -118,9 +136,43 @@ export type TeamFile = { name: string; size: number; updatedAt: number; author?:
 /** The add/edit form: the member being written, and the name it had before an edit. */
 export type Draft = { member: Member; original?: string; isMain?: boolean; error?: string; tab?: 'job' | 'brief' | 'tools' }
 
+/** What the deck pane keeps. Everything in it was measured; nothing is estimated except cost (the engine's). */
+export type DeckTurn = { seq: string; at: number; tok0: number; doing?: string; target?: string; whole: number; edits: number; tests?: boolean }
+export type DeckDone = { n: number; seq: string; tok: number; ms: number; result: 'ok' | 'warn' | 'err' | 'none'; text: string }
+
+export type DeckState = {
+  task?: string
+  taskAt?: number
+  taskTerms: string[]
+  recent: string[][]
+  turns: number
+  model?: string
+  effort?: string
+  branch?: string
+  dirty?: number
+  tests?: { ok: boolean; text: string; at: number }
+  ctx?: { tokens?: number; window: number; percent?: number }
+  limits?: { kind: string; percentUsed: number; resetsAt?: string | number }[]
+  compactions: number
+  cost?: number
+  startedAt?: number
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }
+  atlas?: { files: number; symbols?: number; queries: number; returned: number; avoided: number; on: boolean; state?: string; pending?: number; changed?: number; added?: number; removed?: number; indexedAt?: number; code_files?: number; code_with_symbols?: number; text_files?: number; calls?: number; resolved?: number; lines?: number; db_bytes?: number; langs?: [string, number][] }
+  sessionAvoided?: number
+  /** The turn in progress (or the last one): its calls in order as letters r e f t x, and what it is doing. */
+  cur?: DeckTurn
+  /** The `cur` turn finished: the next tool call (or turn.start) opens a new one. */
+  curDone?: boolean
+  /** Finished turns, newest last, at most 8. */
+  history?: DeckDone[]
+  /** Files this session read or edited, newest last (repo-relative). */
+  touched?: { path: string; edited: boolean }[]
+  feed: { at: number; kind: 'find' | 'read' | 'edit' | 'run' | 'test' | 'topic' | 'note'; text: string; note?: string; tone?: 'good' | 'bad' | 'warn' | 'dim' }[]
+}
+
 declare module 'claude-code' {
   interface PluginState {
-    'team-chat': {
+    'helm': {
       team: Shaped<Team | null>
       live: Shaped<Record<string, Live>>
       channel: Shaped<Msg[]>
@@ -156,6 +208,31 @@ declare module 'claude-code' {
       ctx: { tokens?: number; window: number; percent?: number } | null
       /** Rate-limit windows (five_hour, seven_day), percent used only. */
       limits: { kind: string; percentUsed: number; resetsAt?: string | number }[]
+      /** The deck pane's figures. */
+      deck: Shaped<DeckState>
+      /** The deck's animation frame; advances only while a turn runs. */
+      deckFrame: number
     }
   }
+}
+
+/** A yes/no check on a member's finished work. command, paths_exist and report run in the runtime; criterion is for a verify member. */
+export type Acceptance =
+  | { check: 'command'; run: string; timeoutMs?: number; maxFailures?: number }
+  | { check: 'paths_exist' }
+  | { check: 'report' }
+  | { check: 'criterion'; text: string }
+
+/** Why a member stopped. Set by the runtime from the report and the checks, never by prose alone. */
+export type ExitReason = 'accepted' | 'failed_checks' | 'no_progress' | 'blocked' | 'budget' | 'guardrail' | 'error'
+
+/** A member's final ```json report, parsed. */
+export type Report = {
+  exit: ExitReason
+  summary: string
+  result?: unknown
+  files: string[]
+  commands: string[]
+  openQuestions: string[]
+  nextStep: string
 }

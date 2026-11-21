@@ -3,3 +3,4 @@
 *.log
 .dev/
 .claude/teams/*/files/
+atlas/target/

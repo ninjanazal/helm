@@ -1,17 +1,17 @@
 ---
 name: help
-description: Show the team-chat guide, how to create and start a team, read the pane, talk to members, and every command. Use when the person asks how team-chat works or for its help.
+description: Show the helm guide, how to create and start a team, read the pane, talk to members, and every command. Use when the person asks how helm works or for its help.
 ---
 
 Show the person the guide below as it is, then offer to answer any question about it. Do not call tools.
 
-# team-chat
+# helm
 
 Run a fixed team of subagents. Your session is the **lead**: it splits your tasks, hands them to members, and reports back.
 
 ## Get started
-1. **Create a team**: `/team-chat:create <what it is for>`. Claude reads your project, proposes members with roles, models, effort and a brief, and saves it once you approve. With no team yet, the plugin asks if you want one.
-2. **Start it**: `/team-chat:start [team]`. The pane opens with one box per member. The project remembers the last team; with only one team, it loads automatically.
+1. **Create a team**: `/helm:create <what it is for>`. Claude reads your project, proposes members with roles, models, effort and a brief, and saves it once you approve. With no team yet, the plugin asks if you want one.
+2. **Start it**: `/helm:start [team]`. The pane opens with one box per member. The project remembers the last team; with only one team, it loads automatically.
 3. **Give it work**: type a task in the chat. The lead assigns it and gives you one summary.
 4. **Talk to one member**: `@qa run the e2e suite` in the chat, or ✉ message on its box.
 
@@ -39,14 +39,14 @@ Run a fixed team of subagents. Your session is the **lead**: it splits your task
 - **⇄ switch** changes team, only while no member is working; otherwise the button reads "⇄ switch (busy)". Teams live in `.claude/teams/<team>/team.json`; hand edits apply within a second.
 
 ## Commands
-- `/team-chat:create [goal]`: design and save a new team with Claude
-- `/team-chat:start [team]`: make a team active and open the pane
-- `/team-chat:janitor [operation]`: list, inspect, rename, delete, duplicate teams, edit members, prune shared files, fix a broken team file
-- `/team-chat:help`: this guide
+- `/helm:create [goal]`: design and save a new team with Claude
+- `/helm:start [team]`: make a team active and open the pane
+- `/helm:janitor [operation]`: list, inspect, rename, delete, duplicate teams, edit members, prune shared files, fix a broken team file
+- `/helm:help`: this guide
 - `/team`: open the pane
 - `/new`, `/clear`: keep the active team
 - `/team list`: list the project's teams
-- `/team on` | `/team off`: the team view is off by default, a plain Claude Code chat, even in a project with teams. `/team on` turns it on for the project (remembered, also for `/new` and `/clear`); `/team off` turns it off and closes the pane. `TEAM_CHAT=on claude` starts a session with it on. `/team-chat:start`, `/team <name>` and the `start_team` tool turn it on too. `/team`, `/team list`, `/team help` and `/team-chat:create` work while it is off
+- `/team on` | `/team off`: the team view is off by default, a plain Claude Code chat, even in a project with teams. `/team on` turns it on for the project (remembered, also for `/new` and `/clear`); `/team off` turns it off and closes the pane. `HELM=on claude` starts a session with it on. `/helm:start`, `/team <name>` and the `start_team` tool turn it on too. `/team`, `/team list`, `/team help` and `/helm:create` work while it is off
 - `/team new <name> [from]`: new team: lead only, or copied from an existing team
 - `/team add | edit | remove <member>`: manage members
 - `/team close | open`: one-line view or full boxes
