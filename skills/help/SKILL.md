@@ -15,6 +15,7 @@ If no `superpowers:*` skills are in your skill list, add one line after it: "sup
 | `/helm:deck` | Open the deck pane. |
 | `/helm:deck on` / `off` | Turn the deck on or off for this project. Off stays off across `/clear` and new sessions. |
 | `/helm:deck task <text>` / `reset` | Re-anchor the task (resets drift) / clear the deck. |
+| `/helm:lean [on \| off \| lite \| full]` | Lean mode: the model answers first, skips recaps and writes the smallest complete change, never at the cost of checks or exact code. On by default; `off` (or "stop lean") turns it off; applies from the next session, `/clear` or compaction. A project can pin it in `.claude/helm/lean`. |
 | `/helm:commit [--dry]` | Commit the staged changes: `type(scope): subject`, bulleted body, no attribution lines. `--dry` only shows the message. |
 | `/helm:help` | This guide. |
 

@@ -87,6 +87,9 @@ On split, add this block after `<acceptance>`, one entry per unit, and keep the 
   - unit 2 ...
   Rules: units never share a file; give each sub agent only its unit, scope and check; a unit that fails its
   check twice comes back to the host, not retried blindly; independent units run in parallel.
+  Lean: start every unit brief with "Lean: answer first, no recap, smallest complete change, keep checks and
+  exact code, one line on anything skipped." (sub agents don't inherit the host's system prompt). Leave it out
+  only if the person turned lean off (`/helm:lean off`).
 </split>
 ```
 Pick Haiku for mechanical edits (rename, move, boilerplate, tests from a spec) and Sonnet for units that need

@@ -1,5 +1,6 @@
 import type { EngineInterface } from 'claude-code'
 import { engineIo, setTask } from './task'
+import { leanSet } from './lean'
 import { deckOpenNow, deckReset, deckSet, deckTask } from './deck'
 
 /**
@@ -36,6 +37,16 @@ export async function registerHelmTools($: EngineInterface): Promise<void> {
     isDeferred: false,
   })
   await $.tool.register({
+    name: 'lean',
+    description: 'Lean mode (fewer output tokens, on by default). action: on, off, lite, full, or status.',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: { action: { type: 'string', enum: ['on', 'off', 'lite', 'full', 'status'] } },
+    },
+    isDeferred: false,
+  })
+  await $.tool.register({
     name: 'set_task',
     description:
       'Saves the approved prompt as the current task (.claude/helm/task.md) and sets the deck task to its goal. ' +
@@ -65,6 +76,10 @@ export async function handleHelmTool($: EngineInterface, tool: string, args: Rec
       return text ? toolText(await deckTask($, text)) : toolText('Error: task needs text.', true)
     }
     return toolText('Error: action is one of open, on, off, task, reset.', true)
+  }
+  if (tool === 'mcp__helm__lean') {
+    const a = str(args.action)
+    return toolText(await leanSet($, a === 'on' ? 'full' : a))
   }
   if (tool === 'mcp__helm__set_task') {
     const prompt = str(args.prompt)?.trim()

@@ -6,6 +6,7 @@ helm is a Claude Code plugin:
 
 - **Deck pane:** the session's health beside the chat. It shows the task, a drift meter (time for a fresh session?), context and 5h limit bars with the pace to the limit, tokens, cost, cache hits, the files this session touched, and a live feed of tool calls. It animates only while a turn runs.
 - **`/helm:prompt`:** turns a rough request into a complete, checkable prompt (goal, grounded context, scope, acceptance checks, stop conditions) and saves it as the current task once approved.
+- **Lean mode:** on by default, a short system-prompt section that cuts output tokens. `/helm:lean off` turns it off. Ideas from ponytail and caveman, written natively.
 - **superpowers** (workflow skills) is installed with helm as a plugin dependency; helm's prompt and commit skills route to it and work without it.
 
 ## 📦 Install
@@ -44,6 +45,7 @@ rm -rf .claude/helm/tasks .claude/helm/team.json
 | --- | --- |
 | `/helm:prompt <request>` | Start a task: builds a complete prompt, saves it as the current task once you approve |
 | `/helm:deck [on \| off \| task <text> \| reset]` | The deck pane |
+| `/helm:lean [on \| off \| lite \| full]` | Lean mode, on by default: fewer output tokens (answer first, no recap, smallest complete change) without dropping checks. Pin per project with `.claude/helm/lean` |
 | `/helm:commit [--dry]` | Commit the staged changes: Conventional Commits subject, bulleted body, no attribution lines |
 | `/helm:help` | The full guide |
 
@@ -57,6 +59,7 @@ make bench TASKS=fix-truncate RUNS=1    # one task, one run per arm
 make bench DRY=1                        # list task x arm x run, call nothing, spend nothing
 make bench REPORT=1                     # only print the table from bench/results.jsonl
 make bench MODEL=haiku EFFORT=low       # defaults: sonnet, medium
+make bench ARMS='helm helm-nolean'      # lean A/B: helm vs helm with lean pinned off; then ARM=helm VS=helm-nolean make bench REPORT=1
 sh bench/test.sh                        # free self-test: every check fails on the fixture and passes with its solution.patch
 ```
 

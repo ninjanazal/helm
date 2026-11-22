@@ -6,14 +6,14 @@
 B=$(cd "$(dirname "$0")" && pwd); F=${1:-${RESULTS:-$B/results.jsonl}}
 command -v jq >/dev/null 2>&1 || { echo 'jq not found' >&2; exit 1; }
 [ -s "$F" ] || { echo "no results in $F: run make bench first" >&2; exit 1; }
-jq -rs '
+jq -rs --arg arm "${ARM:-helm}" --arg vs "${VS:-baseline}" '
 def med: sort | length as $n | if $n == 0 then null elif $n % 2 == 1 then .[($n-1)/2] else (.[$n/2-1] + .[$n/2]) / 2 end;
 def tok: .input_tokens + .output_tokens + .cache_read_tokens + .cache_creation_tokens;
 def st($r): {n: ($r|length), pass: ($r|map(select(.pass))|length), tokens: ($r|map(tok)|med), output: ($r|map(.output_tokens)|med), cost: ($r|map(.cost_usd)|med), time: ($r|map(.duration_ms/1000)|med)};
 def sum($k): map(.[$k] // 0) | add;
 def scopes($rows):
   ($rows | map(.task) | unique) as $ts
-  | ([$ts[] as $t | {scope: $t, h: st($rows|map(select(.task == $t and .arm == "helm"))), b: st($rows|map(select(.task == $t and .arm == "baseline")))}]) as $per
+  | ([$ts[] as $t | {scope: $t, h: st($rows|map(select(.task == $t and .arm == $arm))), b: st($rows|map(select(.task == $t and .arm == $vs)))}]) as $per
   | $per + [{scope: "TOTAL",
       h: {n: ($per|map(.h.n)|add), pass: ($per|map(.h.pass)|add), tokens: ($per|map(.h)|sum("tokens")), output: ($per|map(.h)|sum("output")), cost: ($per|map(.h)|sum("cost")), time: ($per|map(.h)|sum("time"))},
       b: {n: ($per|map(.b.n)|add), pass: ($per|map(.b.pass)|add), tokens: ($per|map(.b)|sum("tokens")), output: ($per|map(.b)|sum("output")), cost: ($per|map(.b)|sum("cost")), time: ($per|map(.b)|sum("time"))}}];
