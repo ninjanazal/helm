@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { bar, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
+import { bar, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, parseWorktrees, terms, topicShift, verdict } from './deck-core'
 import type { DeckData } from './deck-core'
 
 const data = (x: Partial<DeckData> = {}): DeckData => ({
@@ -178,4 +178,18 @@ test('deck never opens in an agent session started by helm:agent', async ($, on)
   await $.session.start({ cwd: '/proj', surface: 'terminal', isInteractive: true })
   await clock.advance(3000)
   expect(opened).toEqual([])
+})
+
+test('worktrees: helm agents are the helm/* branches in other folders; the main tree and other branches are skipped', () => {
+  const out = 'worktree /p\nHEAD a1\nbranch refs/heads/main\n\nworktree /p-wt/reviewer\nHEAD b2\nbranch refs/heads/helm/reviewer\n\nworktree /p-wt/spike\nHEAD c3\nbranch refs/heads/feature/x\n\nworktree /p-wt/gone\nHEAD d4\ndetached\n'
+  expect(parseWorktrees(out)).toEqual([{ name: 'reviewer', path: '/p-wt/reviewer', branch: 'helm/reviewer' }])
+  expect(parseWorktrees('')).toEqual([])
+})
+
+test('deck: an AGENTS section lists each agent branch with its commits ahead and uncommitted files; none, no section', () => {
+  const t = text(deck(data({ agents: [{ name: 'reviewer', branch: 'helm/reviewer', ahead: 3, dirty: 2 }, { name: 'scout', branch: 'helm/scout', ahead: 0, dirty: 0 }] }), 46, 0, 3.6e6))
+  for (const x of ['AGENTS', 'reviewer', '⎇ helm/reviewer', '+3', '±2', 'scout']) expect(t).toContain(x)
+  expect(text(deck(data(), 46, 0, 3.6e6))).not.toContain('AGENTS')
+  expect(text(deck(data({ agents: [] }), 46, 0, 3.6e6))).not.toContain('AGENTS')
+  for (const sec of deck(data({ agents: [{ name: 'a-very-long-agent-name-indeed', branch: 'helm/a-very-long-agent-name-indeed', ahead: 12, dirty: 30 }] }), 46, 0, 3.6e6)) for (const l of sec.body) expect(len(l)).toBeLessThanOrEqual(46)
 })

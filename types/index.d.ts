@@ -21,6 +21,10 @@ export type DeckState = {
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }
   atlas?: { files: number; symbols?: number; queries: number; returned: number; avoided: number; on: boolean; state?: string; pending?: number; changed?: number; added?: number; removed?: number; indexedAt?: number; code_files?: number; code_with_symbols?: number; text_files?: number; calls?: number; resolved?: number; lines?: number; db_bytes?: number; langs?: [string, number][] }
   sessionAvoided?: number
+  /** helm agents' worktrees: name, branch, commits ahead of the main tree, uncommitted files. */
+  agents?: { name: string; branch: string; ahead: number; dirty: number }[]
+  /** helm agents working in their own worktrees (branch helm/<name>): commits ahead of this tree, uncommitted files. */
+  agents?: { name: string; branch: string; ahead: number; dirty: number }[]
   /** The turn in progress (or the last one): its calls in order as letters r e f t x, and what it is doing. */
   cur?: DeckTurn
   /** The `cur` turn finished: the next tool call (or turn.start) opens a new one. */
