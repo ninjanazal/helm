@@ -19,6 +19,7 @@ Show the person the guide below as it is, then offer to answer any question abou
 | `/helm:deck task <text>` / `reset` | Re-anchor the task (resets drift) / clear the deck. |
 | `/helm:atlas` | Is the code index fresh, stale or missing, and how big. |
 | `/helm:atlas refresh` | Rebuild the index. |
+| `/helm:commit [--dry]` | Commit the staged changes: `type(scope): subject`, bulleted body, no attribution lines. `--dry` only shows the message. |
 | `/helm:help` | This guide. |
 
 ## The deck

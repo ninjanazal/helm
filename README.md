@@ -36,6 +36,7 @@ From GitHub, without cloning: `/plugin install helm --marketplace ninjanazal/hel
 | `/helm:agent [list \| <name>]` | Hand the current task to an agent in a new herdr tab named after it; with no name, define and save one first |
 | `/helm:deck [on \| off \| task <text> \| reset]` | The deck pane |
 | `/helm:atlas [refresh]` | Index state, or rebuild it |
+| `/helm:commit [--dry]` | Commit the staged changes: Conventional Commits subject, bulleted body, no attribution lines |
 | `/helm:help` | The full guide |
 
 ## 🤖 Agents
