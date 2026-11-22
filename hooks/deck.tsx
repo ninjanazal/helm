@@ -17,8 +17,10 @@ const frame = atom({ plugin: 'helm', key: 'deckFrame' } as const, 0)
 
 let running = false
 let tickGen = 0
-/** Off (/helm:deck off): no auto-open, no reopen after /clear, no polling. */
+/** Off (/helm:switch off): no auto-open, no reopen after /clear, no polling. */
 let deckIsOn = true
+/** helm as a whole is on: lean mode follows the deck's switch. */
+export const helmIsOn = () => deckIsOn
 let deckKey: string | undefined
 
 /** Per-project store key for the on/off choice, pinned to the launch directory. */

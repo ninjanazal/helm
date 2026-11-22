@@ -1,4 +1,4 @@
-import { deckCleared, deckMeasure, deckOpen, deckPrompt, deckStart, deckStep, deckTool, deckTurnDone, registerDeck } from './deck'
+import { helmIsOn, deckCleared, deckMeasure, deckOpen, deckPrompt, deckStart, deckStep, deckTool, deckTurnDone, registerDeck } from './deck'
 import type { Register } from 'claude-code'
 import { leanText, readLevel, LEAN_ID } from './lean'
 import { handleHelmTool, registerHelmTools, toolArgs } from './tools'
@@ -34,6 +34,7 @@ export const register: Register = (on, options) => {
   // Lean mode: one session-scope section appended to the system prompt. Falls through on any error.
   on('prompt.compose', async ($, e, next) => {
     const r = await next(e)
+    if (!helmIsOn()) return r
     const text = leanText(await readLevel($))
     if (!text) return r
     return { sections: [...r.sections.filter(s => s.id !== LEAN_ID), { id: LEAN_ID, text, scope: 'session' as const }] }
