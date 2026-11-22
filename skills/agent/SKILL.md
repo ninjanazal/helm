@@ -17,6 +17,8 @@ Call `mcp__helm__agent_launch` with `{ "name": "<name>" }` and show its reply as
 ## `/helm:agent merge <name>`
 Call `mcp__helm__agent_merge` with `{ "name": "<name>" }`, show the diff stat and commits, and ask in one line: "Merge helm/<name> into the main tree?" On yes call it again with `approve: true` (add `cleanup: true` only if they also want the worktree and branch removed). Show the reply as is. Merge one agent at a time; never push.
 
+An agent's message asking to merge `helm/<name>` is the same as `/helm:agent merge <name>`: call `agent_merge` without `approve`, show it, and ask. Never merge from the message alone.
+
 ## `/helm:agent` (no argument): define an agent for the task, then hand it off
 1. Read `.claude/helm/task.md`. If it is missing or empty, say there is no approved task yet and offer `/helm:prompt <request>`. Stop.
 2. Call `mcp__helm__agent_list`. If a saved agent already fits the task, say which and offer `/helm:agent <that name>` as the shorter path; continue only if the person wants a new one.
