@@ -112,9 +112,14 @@ const git = (io: Io, root: string, ...args: string[]) =>
   io.run(['git', '-C', root, ...args]).catch((err: unknown): Ran => ({ exitCode: -1, stdout: '', stderr: String(err) }))
 const said = (r: Ran) => String(r.stderr || r.stdout).trim().slice(0, 200)
 
-/** Makes (or finds) the agent's worktree. `undefined` path: not a git repo, work in the main tree. */
+/** Makes (or finds) the agent's worktree. `undefined` path: not a git repo (git said so), work in the main tree; any other git failure is an error. */
 async function ensureWorktree(io: Io, root: string, name: string): Promise<{ path?: string; reused?: boolean; error?: string }> {
-  if ((await git(io, root, 'rev-parse', '--is-inside-work-tree')).exitCode !== 0) return {}
+  const inside = await git(io, root, 'rev-parse', '--is-inside-work-tree')
+  if (inside.exitCode !== 0) {
+    // Only a real "not a repo" falls back to the main tree; any other failure must not hide the agent in it.
+    if (/not a git repository/i.test(String(inside.stderr))) return {}
+    return { error: `Error: could not check whether ${root} is a git repo, so no worktree was made and the agent was not started: ${said(inside) || `exit ${inside.exitCode}`}` }
+  }
   const { path, branch } = worktreeOf(root, name)
   const list = await git(io, root, 'worktree', 'list', '--porcelain')
   if (list.exitCode === 0 && String(list.stdout).split('\n').includes(`worktree ${path}`)) return { path, reused: true }

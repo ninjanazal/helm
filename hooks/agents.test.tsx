@@ -147,6 +147,14 @@ test('launch: git failing to add the worktree is an error and no tab opens', asy
   expect(m.runs.some(a => a[1] === 'tab' || a[1] === 'pane')).toBe(false)
 })
 
+test('launch: git failing for another reason is an error, not a silent fall back to the main tree', async () => {
+  const m = memIo({ '/p/.claude/agents/reviewer.md': agentFile(SPEC), '/p/.claude/helm/task.md': 'x' }, TAB_REPLY, { 'rev-parse': { exitCode: -1, stdout: '', stderr: 'spawn git ENOENT' } })
+  const r = await launchAgent(m.io, { root: '/p', herdr: H }, 'reviewer')
+  expect(r.isError).toBe(true)
+  expect(r.text).toContain('spawn git ENOENT')
+  expect(m.runs.some(a => a[0] === H.bin)).toBe(false)
+})
+
 test('launch: outside a git repo it opens the tab in the main tree, no worktree', async () => {
   const m = memIo({ '/p/.claude/agents/reviewer.md': agentFile(SPEC), '/p/.claude/helm/task.md': 'x' }, TAB_REPLY, { 'rev-parse': fail('not a git repository') })
   const r = await launchAgent(m.io, { root: '/p', home: '/h', herdr: H }, 'reviewer')
