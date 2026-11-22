@@ -11,6 +11,7 @@ SP=superpowers@claude-plugins-official
 ALL="helm superpowers herdr atlas"
 BIN_local=$ROOT/.atlas/bin
 BIN_user=$HOME/.local/bin
+PY=${PY:-python3}
 
 if [ -t 1 ] && [ -z "$NO_COLOR" ]; then
   B=$(printf '\033[1m') D=$(printf '\033[2m') R=$(printf '\033[0m') G=$(printf '\033[32m')
@@ -27,7 +28,8 @@ interactive() { [ -n "$HELM_INTERACTIVE" ] || [ -t 0 ]; }
 has_claude() { command -v claude >/dev/null 2>&1; }
 
 scope_word() { [ "$1" = user ] && say 'every project' || say 'this project'; }
-bin_dir() { [ "$SCOPE" = user ] && say "$BIN_user" || say "$BIN_local"; }
+venv_dir() { [ -n "$ATLAS_VENV" ] && { say "$ATLAS_VENV"; return; }; [ "$SCOPE" = user ] && say "${XDG_DATA_HOME:-$HOME/.local/share}/helm/atlas" || say "$ROOT/.atlas/venv"; }
+bin_dir() { [ -n "$ATLAS_BIN_DIR" ] && { say "$ATLAS_BIN_DIR"; return; }; [ "$SCOPE" = user ] && say "$BIN_user" || say "$BIN_local"; }
 atlas_bin() {
   if [ -n "$ATLAS" ]; then say "$ATLAS"; return; fi
   for b in "$BIN_local/atlas" "$BIN_user/atlas"; do [ -x "$b" ] && { say "$b"; return; }; done
@@ -69,25 +71,6 @@ ask_scope() {
   done
 }
 
-# ask_pieces <verb>: sets PIECES unless preset or nobody to ask (then: all).
-ask_pieces() {
-  [ -n "$PIECES" ] && return
-  PIECES=$ALL
-  interactive || return 0
-  say ''; say "${B}Which pieces?${R}  ${D}(numbers separated by spaces, Enter = all)${R}"
-  i=0; for p in $ALL; do i=$((i+1)); printf '  %d) %-15s %s%s%s\n' $i "$(piece_label $p)" "$D" "$(piece_state $p)" "$R"; done
-  while :; do
-    printf '> '; read -r a || a=
-    [ -z "$a" ] && return
-    picked= okay=1
-    for n in $a; do
-      case $n in 1) picked="$picked helm";; 2) picked="$picked superpowers";; 3) picked="$picked atlas";; 4) picked="$picked herdr";;
-        *) say "${Y}not a choice:${R} $n"; okay=;; esac
-    done
-    [ -n "$okay" ] && [ -n "$picked" ] && { PIECES=$picked; return; }
-  done
-}
-
 need_claude() { has_claude || die "${Y}○${R} claude not found: install Claude Code first."; }
 
 install_helm() {
@@ -103,14 +86,19 @@ install_superpowers() {
   if at_scope "$SP"; then done_ "superpowers already installed ($SCOPE)"
   else claude plugin install "$SP" --scope "$SCOPE" && done_ "superpowers installed ($SCOPE)"; fi
 }
+# atlas is one Python file. It gets its own venv (never system-wide) and a small launcher on PATH.
 install_atlas() {
-  command -v cargo >/dev/null 2>&1 || { say "${Y}○${R} cargo not found: install Rust via rustup, then re-run."; return 1; }
+  command -v "$PY" >/dev/null 2>&1 || { say "${Y}○${R} $PY not found: install Python 3.9+, then re-run."; return 1; }
   need_claude
-  bin=$(bin_dir)
-  cargo install --path "$ROOT/atlas" --root "$(dirname "$bin")" --quiet --force || return 1
+  bin=$(bin_dir); venv=$(venv_dir)
+  "$PY" -m venv "$venv" || return 1
+  "$venv/bin/python" -m pip install --quiet --disable-pip-version-check -r "$ROOT/atlas/requirements.txt" || return 1
+  cp "$ROOT/atlas/atlas.py" "$venv/atlas.py" || return 1
+  mkdir -p "$bin"
+  printf '#!/bin/sh\nexec "%s/bin/python" "%s/atlas.py" "$@"\n' "$venv" "$venv" > "$bin/atlas.new" && chmod +x "$bin/atlas.new" && mv -f "$bin/atlas.new" "$bin/atlas" || return 1
   claude mcp remove --scope "$SCOPE" atlas >/dev/null 2>&1 || true
   claude mcp add --scope "$SCOPE" atlas -- "$bin/atlas" mcp >/dev/null || return 1
-  done_ "atlas ($SCOPE) → $bin/atlas, MCP server registered"
+  done_ "atlas ($SCOPE) → $bin/atlas (venv $venv), MCP server registered"
   [ "$SCOPE" = user ] && say "  ${D}atlas indexes a repo the first time its tools are used, or run: make index${R}"
   return 0
 }
@@ -129,25 +117,33 @@ uninstall_atlas() {
   has_claude && claude mcp remove --scope "$SCOPE" atlas >/dev/null 2>&1 && done_ "MCP server \"atlas\" removed ($SCOPE)" || miss "no atlas MCP server at $SCOPE scope"
   bin=$(bin_dir)
   if [ -x "$bin/atlas" ]; then rm -f "$bin/atlas"; done_ "removed $bin/atlas"; fi
+  [ -d "$(venv_dir)" ] && rm -rf "$(venv_dir)" && done_ "removed $(venv_dir)"
 }
 uninstall_herdr() { miss 'herdr is not managed by helm; nothing to remove'; }
 install_index() { cmd_index; }
 uninstall_index() { rm -rf "${DIR:-$ROOT}"/.atlas/graph.db* && done_ 'index removed'; }
 
-# helm already installed: offer what else can be done with it.
-helm_action() {
-  at_scope "$ID" && interactive || { install_helm; return; }  # no one to ask: install, or leave as is
-  say ''; say "${B}helm is installed ($SCOPE).${R} 1) update (default)  2) disable  3) enable  4) leave"
+# helm already installed: update it; otherwise install it.
+helm_action() { if at_scope "$ID"; then cmd_update; else install_helm; fi; }
+
+# ask_action: install/update (default) or remove. Sets ACTION.
+ask_action() {
+  ACTION=install
+  interactive || return 0
+  say ''; say "${B}What?${R}"
+  say '  1) install / update   (default)'
+  say '  2) remove'
   while :; do
     printf '> '; read -r a || a=
-    case $a in ''|1) cmd_update; return;; 2) cmd_disable; return;; 3) cmd_enable; return;; 4) return;;
-      *) say "${Y}not a choice:${R} $a";; esac
+    case $a in ''|1) return;; 2) ACTION=remove; return;; *) say "${Y}not a choice:${R} $a";; esac
   done
 }
 
 cmd_setup() {
   printf '\n  %s⎈ %shelm setup%s\n' "$M" "$B" "$R"
-  ask_scope; ask_pieces
+  ask_scope; ask_action
+  [ "$ACTION" = remove ] && { do_remove; return; }
+  PIECES=${PIECES:-$ALL}
   for p in $PIECES; do
     step "$(piece_label $p) · $(scope_word $SCOPE)"
     case $p in helm) helm_action;; *) "install_$p";; esac || failed="$failed $p"
@@ -157,12 +153,9 @@ cmd_setup() {
   printf '\n%s✔ Done.%s In Claude Code: %s/reload-plugins%s, then %s/helm:deck%s.\n' "$G" "$R" "$B" "$R" "$B" "$R"
 }
 
-cmd_remove() {
-  if ! interactive && [ -z "$HELM_YES" ]; then
-    die "${Y}○${R} make remove asks what to remove; run it in a terminal."
-  fi
-  printf '\n  %s⎈ %shelm remove%s\n' "$M" "$B" "$R"
-  ask_scope; ask_pieces
+# do_remove: confirm (unless HELM_YES), then uninstall PIECES (default: all helm manages).
+do_remove() {
+  PIECES=${PIECES:-helm superpowers atlas}
   if [ -z "$HELM_YES" ]; then
     printf '\nRemove%s from %s? [y/N] ' "$(for p in $PIECES; do printf ' %s' "$(piece_label $p)"; done)" "$(scope_word $SCOPE)"
     read -r a || a=
@@ -170,6 +163,14 @@ cmd_remove() {
   fi
   for p in $PIECES; do "uninstall_$p"; done
   say "  ${D}.atlas/ and .claude/ stay in place.${R}"
+}
+
+cmd_remove() {
+  if ! interactive && [ -z "$HELM_YES" ]; then
+    die "${Y}○${R} make remove asks what to remove; run it in a terminal."
+  fi
+  printf '\n  %s⎈ %shelm remove%s\n' "$M" "$B" "$R"
+  ask_scope; do_remove
 }
 
 row_ok()   { printf '  %s✔%s %-36s %s%s%s\n' "$G" "$R" "$1" "$D" "$2" "$R"; }
@@ -207,7 +208,9 @@ tailed() {
 cmd_test() {
   need_claude
   (cd "$ROOT" && claude plugin test .) || exit 1
-  tailed 2 cargo test -q --manifest-path "$ROOT/atlas/Cargo.toml" || exit 1
+  v=$(SCOPE=local venv_dir); [ -x "$v/bin/python" ] || v=$(SCOPE=user venv_dir)
+  if [ -x "$v/bin/python" ]; then tailed 2 "$v/bin/python" -m unittest discover -s "$ROOT/atlas" -p 'test_*.py' || exit 1
+  else miss 'atlas tests skipped: no atlas venv (make setup)'; fi
   [ -n "$HELM_IN_TEST" ] || tailed 1 sh "$ROOT/scripts/helm.test.sh" || exit 1
 }
 cmd_check() { cmd_validate && cmd_test; }
@@ -220,7 +223,7 @@ cmd_bench() {
 cmd_help() {
   version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$ROOT/.claude-plugin/plugin.json" | head -1)
   printf '\n  %s⎈ %shelm%s %sv%s · Claude Code plugin + atlas%s\n\n' "$M" "$B" "$R" "$D" "$version" "$R"
-  printf '    %smake setup%s    install or update helm, superpowers, atlas %s(asks where and what)%s\n' "$C" "$R" "$D" "$R"
+  printf '    %smake setup%s    install / update or remove helm, superpowers, atlas %s(asks where, then what)%s\n' "$C" "$R" "$D" "$R"
   printf '    %smake remove%s   uninstall pieces %s(asks where and what, then confirms)%s\n' "$C" "$R" "$D" "$R"
   printf '    %smake status%s   what is installed, and where\n' "$C" "$R"
   printf '    %smake index%s    build or refresh the atlas index of this repo\n' "$C" "$R"

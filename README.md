@@ -7,7 +7,7 @@ helm is a Claude Code plugin plus **atlas**, a local code graph:
 - **Deck pane:** the session's health beside the chat. It shows the task, a drift meter (time for a fresh session?), context and 5h limit bars with the pace to the limit, tokens, cost, cache hits, tokens saved by atlas, and a live feed of tool calls. It animates only while a turn runs.
 - **`/helm:prompt`:** turns a rough request into a complete, checkable prompt (goal, grounded context, scope, acceptance checks, stop conditions) and saves it as the current task once approved.
 - **`/helm:agent`:** hands that task to a saved agent in its own herdr tab, or defines a new agent for it first. Each agent works in its own git worktree and branch; `/helm:agent merge <name>` merges it into the main tree after you approve. `/helm:agent team` splits a task across several agents at once; this session orchestrates them (status, questions, merges) and the deck shows the team.
-- **atlas** (`atlas/`, Rust): indexes code in 12 languages (GDScript included) plus docs and config into `.atlas/graph.db`. It answers `find`, `symbol`, `neighbors` and `outline` over MCP with `path:lines`, not whole files. No services or models are needed.
+- **atlas** (`atlas/`, one Python file, runs in its own venv): indexes code in 12 languages (GDScript included) plus docs and config into `.atlas/graph.db`. It answers `find`, `symbol`, `neighbors` and `outline` over MCP with `path:lines`, not whole files. No services or models are needed.
 - **superpowers** (workflow skills) is installed with helm as a plugin dependency; helm's prompt, agent and commit skills route to it and work without it. **herdr** (agent-aware terminal) is optional.
 
 ## 📦 Install

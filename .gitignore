@@ -6,3 +6,4 @@
 atlas/target/
 .superpowers/
 .claude/helm/
+__pycache__/
