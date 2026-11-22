@@ -1,4 +1,5 @@
 import type { EngineInterface } from 'claude-code'
+import { atlasTool } from './atlas'
 import { deckOpenNow, deckReset, deckSet, deckTask } from './deck'
 
 /**
@@ -34,6 +35,12 @@ export async function registerHelmTools($: EngineInterface): Promise<void> {
     },
     isDeferred: false,
   })
+  await $.tool.register({
+    name: 'atlas',
+    description: 'Reports the atlas code index for this project (status: fresh, stale or not indexed, with counts), or rebuilds it (refresh).',
+    inputSchema: { type: 'object', required: ['action'], properties: { action: { type: 'string', enum: ['status', 'refresh'] } } },
+    isDeferred: false,
+  })
 }
 
 /** Runs a helm tool; undefined when `tool` is not one of helm's. */
@@ -49,6 +56,12 @@ export async function handleHelmTool($: EngineInterface, tool: string, args: Rec
       return text ? toolText(await deckTask($, text)) : toolText('Error: task needs text.', true)
     }
     return toolText('Error: action is one of open, on, off, task, reset.', true)
+  }
+  if (tool === 'mcp__helm__atlas') {
+    const action = str(args.action) ?? 'status'
+    if (action !== 'status' && action !== 'refresh') return toolText('Error: action is status or refresh.', true)
+    const r = await atlasTool($, action, await $.session.cwd().catch(() => undefined))
+    return toolText(r.text, r.isError)
   }
   return undefined
 }

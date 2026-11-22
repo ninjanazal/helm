@@ -3,6 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { DRIFT_AT, PANE_FRAME_MS, deck, drift, isDeckOn, layout, terms, topicShift, verdict } from './deck-core'
 import type { DeckData, FeedItem } from './deck-core'
 import type { DeckDone, DeckState } from '../types'
+import { atlasBin } from './atlas'
 
 /**
  * The deck pane: the session's health beside the chat. Every figure comes from the engine (session.measure,
@@ -39,17 +40,6 @@ function addFeed(s: DeckState, f: Omit<FeedItem, 'at'>, at: number): DeckState {
 }
 
 const TEST_RE = /\b(make (test|check)|npm (run )?test|pnpm test|yarn test|bun test|cargo test|pytest|go test|claude plugin test)\b/
-
-/** The atlas to ask: this project's own (make atlas SCOPE=local), else the user's, else whatever PATH finds. */
-async function atlasBin($: EngineInterface, cwd: string | undefined): Promise<string | undefined> {
-  const home = (await $.env.get('HOME').catch(() => undefined)) ?? ''
-  for (const p of [cwd ? `${cwd}/.atlas/bin/atlas` : '', home ? `${home}/.local/bin/atlas` : ''].filter(Boolean)) {
-    const dir = p.slice(0, p.lastIndexOf('/'))
-    if (await $.fs.list(dir).then(l => l.some(f => f.name === 'atlas'), () => false)) return p
-  }
-  const r = await $.process.run(['sh', '-c', 'command -v atlas'], { timeoutMs: 2000 }).catch(() => undefined)
-  return r && r.exitCode === 0 ? String(r.stdout).trim() || undefined : undefined
-}
 
 async function poll($: EngineInterface) {
   const cwd = await $.session.cwd().catch(() => undefined)
