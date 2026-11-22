@@ -1,12 +1,12 @@
 # ⎈ helm
 
-> Steer your Claude Code sessions: see what they cost and when they drift, write better prompts, and find code without reading whole files.
+> Steer your Claude Code sessions: see what they cost and when they drift, start every task from a complete prompt, hand it to agents in their own pane, and find code without reading whole files.
 
 helm is a Claude Code plugin plus **atlas**, a local code graph:
 
 - **Deck pane:** the session's health beside the chat. It shows the task, a drift meter (time for a fresh session?), context and 5h limit bars with the pace to the limit, tokens, cost, cache hits, tokens saved by atlas, and a live feed of tool calls. It animates only while a turn runs.
-- **`/helm:prompt`:** turns a rough request into a complete, checkable prompt (goal, grounded context, scope, acceptance checks, stop conditions) before any work starts.
-- **Guardrails:** refuses risky commands (`git push`, `rm -rf`, `git stash`, …) for subagents, with labelled exits and runtime acceptance checks.
+- **`/helm:prompt`:** turns a rough request into a complete, checkable prompt (goal, grounded context, scope, acceptance checks, stop conditions) and saves it as the current task once approved.
+- **`/helm:agent`:** hands that task to a saved agent in its own herdr pane, or defines a new agent for it first.
 - **atlas** (`atlas/`, Rust): indexes code in 12 languages (GDScript included) plus docs and config into `.atlas/graph.db`. It answers `find`, `symbol`, `neighbors` and `outline` over MCP with `path:lines`, not whole files. No services or models are needed.
 - Optional companions: **superpowers** (workflow skills) and **herdr** (agent-aware terminal).
 
@@ -18,132 +18,31 @@ make global    # every project
 make doctor    # what is installed, and where
 ```
 
-Every piece can be installed or removed on its own, per scope: `make <piece>` / `make <piece>-remove` with `SCOPE=local|user` (pieces: `plugin`, `superpowers`, `atlas`, `index`). Then run `/reload-plugins` and `/deck` in Claude Code.
+Every piece can be installed or removed on its own, per scope: `make <piece>` / `make <piece>-remove` with `SCOPE=local|user` (pieces: `plugin`, `superpowers`, `atlas`, `index`). Then run `/reload-plugins` and `/helm:deck` in Claude Code.
 
 From GitHub, without cloning: `/plugin install helm --marketplace ninjanazal/helm`.
 
 ## 🧭 Deck
 
-- `/deck` opens the pane; `/deck task <text>` re-anchors the task (and resets drift); `/deck reset` clears it.
+- `/helm:deck` opens the pane; `/helm:deck on|off` turns it on or off for the project (off survives `/clear` and new sessions); `/helm:deck task <text>` re-anchors the task (and resets drift); `/helm:deck reset` clears it.
 - Drift = 0.4 × context fill + 0.4 × topic shift (new terms vs. the task's first prompt) + 0.2 × turns/60. At 0.70 it suggests a fresh session.
 - Every number comes from the engine, git or `atlas stats --json`; cost is the engine's own estimate.
 
-## 👥 Teams (legacy)
-
-The earlier team mode (fixed job members in a pane, `/team on`) still ships while it's being phased out:
-
-### Quick start
-
-1. `/helm:create what it's for`: Claude looks at your project, interviews you briefly, proposes a team and saves it once you approve.
-2. `/team on` (or `/helm:start`): opens the pane.
-3. Give the lead a task in the main chat. It splits the work and starts members in the background.
-4. Talk to anyone with `@backend …`.
-
-### 🧭 Commands
+## ⌨️ Commands
 
 | Command | What it does |
 | --- | --- |
-| `/helm:create [purpose]` | Design and save a new team |
-| `/helm:start [team]` | Make a team active and open the pane |
-| `/helm:janitor [operation]` | List, inspect, rename, delete, duplicate, edit teams and members, prune files, fix a broken team file. Asks before anything destructive |
-| `/helm:help`, `/team help`, **? help** | The full guide |
-| `/team on` / `/team off` | Turn the team view on or off |
-| `/team <name>` / `/team list` | Open a team / list teams |
-| `/team new <team> [from]` | Create a team, empty or copied |
-| `/team add\|edit\|remove <name>` | Manage members |
-| `/team reload` | Force a reload of the team file |
-| `/team open` / `/team close` | Full cards / one line per member |
-| `/team layout auto\|compact\|wide\|mini` | How cards are drawn |
-| `/team palette pastel\|default` | Colours |
-| `/team tab overview\|chain\|files` | Switch tab |
-| `/team files` | Open the shared files |
-| `/team queue <member\|any> <task>` | Queue a task; `/team queue` lists, `/team queue rm #<id>` removes |
+| `/helm:prompt <request>` | Start a task: builds a complete prompt, saves it as the current task once you approve |
+| `/helm:agent [list \| <name>]` | Hand the current task to an agent in a new herdr pane; with no name, define and save one first |
+| `/helm:deck [on \| off \| task <text> \| reset]` | The deck pane |
+| `/helm:atlas [refresh]` | Index state, or rebuild it |
+| `/helm:help` | The full guide |
 
-### 🔌 On/off
+## 🤖 Agents
 
-The team view is **off by default**. A session is a plain Claude Code chat (no team prompt, no `@member` routing, no queue, no pane), even in a project that already has teams.
-
-- `/team on` reloads the last team, opens the pane and remembers the choice per project, so `/new` and `/clear` stay on.
-- `/team <name>`, `/helm:start` and `/helm:create` also turn it on.
-- `/team off` turns it off and closes the pane.
-- `HELM=on claude` launches with it on (not stored).
-- `/team`, `/team list` and `/team help` work while it is off.
-
-### 🖥️ The pane
-
-- 🗂️ **Tabs:** **Overview** (cards and receipt, with a ⚑N badge for members needing help or you), **Chain**, **Files**. The pane remembers the tab.
-- 🃏 **Cards:** each shows `model · effort · ctx · out · steps`. `ctx` is the latest request's input tokens, `out` the output tokens; a `max_tokens` stop shows in red.
-- 🧾 **Receipt:** a line under the header summarises the running or last lead turn: duration, agents used, edits, errors.
-- 📊 **Usage row:** context fill, 5h/wk limits (the 5h one with a `↻` countdown to its reset, from 60 columns wide) and the crew's footprint (`Σ 42k`, each member's latest ctx + out) sit centered at the bottom of the pane from the moment it opens.
-- ⌨️ **Keys:** on Overview, `1`–`9` expands that member's card (full task, last tool calls, start of its answer). Clicking a member does the same.
-- 📜 **Scrolling:** the mouse wheel scrolls; with the pane focused, so do the arrow and page keys. On Chat, **↓ latest** jumps to the newest message.
-- 🔀 **Pick a team:** `/team` asks which one when there are several. The last team is remembered per project, and a lone team loads automatically. **⇄ switch** works only while no member is working (otherwise it reads "⇄ switch (busy)").
-
-### 🚩 Flags
-
-- **⚑ needs you** appears when:
-  - a member asks for permission (its tool check returns `ask`, or a permission dialog opens for it) and the same call is still pending after about 1.5 seconds, so a call that runs at once never flashes it;
-  - a member sends `NEEDS-HUMAN: <question>`;
-  - its `BLOCKED:` line mentions permission or approval.
-- **◆ needs help** appears when a member sends a `BLOCKED:` message mid-run.
-
-Both blink and show the reason. A flag clears when the permission is answered or its tool runs, when the member's next step starts, when you message it, or when a newer message replaces the blocked one.
-
-Good to know:
-- A member that has finished (done or idle) never shows a flag: a `BLOCKED:` line in its final answer stays in the chat and the log only.
-- A member only waiting on its own background work or on messages shows as working. Only a permission ask (a tool check `ask` or an open permission dialog) raises the permission flag.
-- No flag in `bypassPermissions` or `dontAsk` (the mode settles the ask). In `auto` a plain ask is settled by the classifier, but a hard ask (such as the read-outside-working-directory block) still flags. Skipped asks are noted in the log.
-- After a denied ask, the flag stays until the member's next tool call or the end of its turn. It is matched on the tool call id, falling back to the tool name.
-
-### 🗣️ Talking to the team
-
-- **Give the lead a task** in the main chat. Your main session is the lead. If the team sets a **main** member, untargeted prompts go to it instead.
-- **Talk to a member** with `@backend …` (or **✉ message** on its card). It is resumed or started. `@lead …` reaches your main session.
-- **Members never spawn agents.** Only the lead starts members; a member reaches a teammate by name with SendMessage. The Agent tool is removed only when a member's entry has an explicit `tools` list. Otherwise the rule lives in its brief only, because the plugin cannot exclude a single tool.
-- **`/new` and `/clear`** keep the active team, and the lead is told about it again.
-
-### 📋 Queue
-
-Read-only tab showing all member work in three groups: **Active** (running now, flagged ones included), **Queued** and **Done**. Each group shows what fits, with `+N more` when rows are cut and `N hidden` when a group does not fit.
-
-Add tasks with `/team queue <member|any> <task>`. A task is sent when its member is idle or done, never to one that needs help or you. The lead cannot be queued: give it work in the chat.
-
-### 📝 Member briefs and summaries
-
-Each member has a brief: its **purpose**, **responsibilities**, **how it works**, **boundaries** (what it must never do) and when it is **done**. The brief becomes its instructions.
-
-Each card shows the member's **task** and a live **now** line: a one-sentence summary written by Haiku from its latest actions at most every 20 seconds while it works (billed to your account like any model call), and the first line of its report once done.
-
-### 📁 Shared team files
-
-Members and the lead keep plans, specs, decisions, API contracts and handoff notes as **team files** in `.claude/teams/<team>/files/`, through three tools: `write_file` (replace or append, with a one-line note), `read_file` and `list_files`. Every brief tells the member to check them before starting and to save anything a teammate or a later session will need. Members with restricted tools still get these three.
-
-- Each write records its author in `files/.index.json` and posts `📄 wrote <file>` in `#team`.
-- **📁 files** in the header (or `/team files`) lists them, newest first; click one to read it.
-- They are ordinary files in your project: they persist across sessions and you share them by committing. Hand edits and `git pull`s show up within a second.
-
-### 👥 Teams and members
-
-Teams live in `.claude/teams/<team>/team.json` (an older `.claude/team.json` is picked up too). With no team, the plugin asks whether to create one.
-
-- `/team new <team> [from]`, or **+ new team** in the picker.
-- **+ member** / `/team add <name>` opens a form: name, role, emoji, model, effort, when to use, instructions, tools.
-- **✎ edit** / `/team edit <name>`, `/team remove <name>`.
-- **⇅ move** (or **⇅** on rows and the mini line): click it, then **↳ place here** at the new spot; **Cancel** drops the pick. The lead is always first and cannot be moved; the edit form keeps its Position and up/down buttons.
-- Hand edits are picked up within a second; `/team reload` forces it.
-
-### 🔗 Who answers to whom
-
-Each member can set two optional fields in the team file:
-
-- **`reportsTo`**: the member it answers to. Missing means the lead. Chains must end at the lead, with no loops.
-- **`handsTo`**: the members that receive its finished work, in order. It may name the lead, and loops are allowed (for example builder → tester → builder).
-
-The **Chain** tab draws a tree from you (the lead) with `├─` / `└─` connectors for who reports to whom, each member with its live status, role and model, and `⇢` arrows for who it hands work to. The lead is told about the chain too, so it knows where a member's result should go next. It sets the order, not a wall: any member can still message any other directly.
-
-A team can also name one member as **`main`** (a team-level field). Prompts without an `@` target go to it; `@member …` still goes to any member. Leave it out and your main session handles them.
-
-Set these with `/helm:create` or `/helm:janitor`, or by hand. Invalid values are rejected when saving; on a hand edit they are dropped with a warning in `#team`. Every change is posted in `#team` and told to the lead.
+- Agents are Claude Code agent files: `.claude/agents/<name>.md` (project) or `~/.claude/agents/` (user).
+- `/helm:agent <name>` opens a herdr pane to the right and runs `claude --agent <name>` on the task in `.claude/helm/task.md` (git-ignored). The pane gets `HELM_AGENT=<name>`: no deck there, no nested agents.
+- Needs [herdr](https://herdr.dev); `/helm:agent list` works without it.
 
 ## 🛠️ Developing
 

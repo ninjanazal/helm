@@ -54,7 +54,7 @@ local: ## Everything for THIS project only: plugin, superpowers, atlas + index
 	@$(MAKE) --no-print-directory atlas SCOPE=local
 	$(call step,atlas · index $(CURDIR))
 	@$(MAKE) --no-print-directory index DIR=$(CURDIR)
-	@printf '\n$(G)✔ Local setup done.$(R) In Claude Code: $(B)/reload-plugins$(R), then $(B)/deck$(R).\n'
+	@printf '\n$(G)✔ Local setup done.$(R) In Claude Code: $(B)/reload-plugins$(R), then $(B)/helm:deck$(R).\n'
 
 global: ## Everything for EVERY project: plugin, superpowers, atlas (index per repo)
 	$(call step,helm plugin · every project)
@@ -65,7 +65,7 @@ global: ## Everything for EVERY project: plugin, superpowers, atlas (index per r
 	@$(MAKE) --no-print-directory herdr
 	$(call step,atlas · binary + MCP for every project)
 	@$(MAKE) --no-print-directory atlas SCOPE=user
-	@printf '\n$(G)✔ Global setup done.$(R) In Claude Code: $(B)/reload-plugins$(R), then $(B)/deck$(R).\n'
+	@printf '\n$(G)✔ Global setup done.$(R) In Claude Code: $(B)/reload-plugins$(R), then $(B)/helm:deck$(R).\n'
 	@printf '  $(D)atlas indexes a repo the first time its tools are used, or run: make index DIR=<repo>$(R)\n'
 
 unlocal: ## Undo `make local` (the index in .atlas/ stays; make index-remove drops it)

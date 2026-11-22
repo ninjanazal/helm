@@ -1,7 +1,7 @@
 {
   "name": "helm",
   "version": "0.1.0",
-  "description": "Steer Claude Code sessions: a live deck pane (context, limits, drift, savings), a prompt builder, guardrails, and atlas, a local code graph.",
+  "description": "Steer Claude Code sessions: a live deck pane, a prompt builder, agents handed tasks in herdr panes, and atlas, a local code graph.",
   "license": "MIT",
   "types": "./types/index.d.ts",
   "author": {
@@ -10,7 +10,6 @@
   "repository": "https://github.com/ninjanazal/helm",
   "keywords": [
     "agents",
-    "team",
     "subagents",
     "pane",
     "orchestration",

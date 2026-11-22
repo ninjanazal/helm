@@ -1,19 +1,24 @@
 ---
 name: prompt
-description: Turn a rough request into a complete, checkable work prompt before any work starts (goal, grounded context, constraints, acceptance checks, stop conditions, output). Use when the person says "prompt", "brief", "help me ask", "write the prompt for", or starts a non-trivial task with a short or vague request.
+description: Start a new task the helm way - turn the rough request into a complete, checkable prompt (goal, grounded context, constraints, acceptance checks, stop conditions, output), get it approved, and save it as the current task. Use when the person runs /helm:prompt, or says "prompt", "brief", "help me ask", "write the prompt for".
+argument-hint: "<rough request>"
 ---
 
 # Build the prompt first
 
 The person prefers a complete input and a better result over a terse one. Your job here is to write the
-prompt, not to do the work. Do the work only after they approve the prompt.
+prompt, not to do the work. Every step below runs, every time, however clear the request looks.
+
+## 0. Re-anchor the deck
+Call `mcp__helm__deck` with `{ "action": "task", "text": "<the request, one line, at most 80 characters>" }`. Do not show its reply.
+If `$ARGUMENTS` is empty, ask in one line what the task is, then continue.
 
 ## 1. Ground it (cheap, before asking anything)
 - If the `atlas` MCP tools exist, use them: `find` for the request's key terms, `symbol` / `outline` for the
   names it mentions, `neighbors` for what a change would touch. Otherwise use Grep/Glob. Read only the
   returned ranges.
 - Collect: the files and symbols involved (`path:lines`), how this repo tests (`Makefile`, package scripts,
-  CI), the conventions you see (commit style, lint rules, CLAUDE.md), and earlier decisions in team files or docs.
+  CI), the conventions you see (commit style, lint rules, CLAUDE.md), and earlier decisions in docs.
 - Stop grounding after about 10 tool calls. The goal is a precise prompt, not a solution.
 
 ## 2. Find the real gaps
@@ -63,10 +68,13 @@ Fix it, don't just flag it, if any of these is true:
 - It contains persona text ("You are a senior…"), urgency or flattery. These add nothing.
 - It repeats itself, or holds generic advice that would fit any task.
 
-## 5. Hand it over
-Show the prompt in one fenced block, then one line: "Run it, edit it, or change the scope?"
-- On "run": do the work with that prompt as the contract, and finish with the `<output>` report, checked
-  against `<acceptance>`.
+## 5. Get it approved
+Show the prompt in one fenced block, then one line: "Approve it, edit it, or change the scope?"
 - If they edit: apply the edits, re-check step 4, and show it again.
-- Save the approved prompt under `.claude/prompts/<yyyy-mm-dd>-<slug>.md` so good prompts can be reused
-  and compared later.
+- Do not start the work in this step, even if they say "run it": approval comes first, then step 6.
+
+## 6. Save it and stop
+On approval call `mcp__helm__set_task` with `{ "prompt": "<the approved prompt, whole>", "goal": "<the goal in one line>" }`.
+Then stop and offer the two ways on, in two lines:
+- **Work on it here**: say so and this session does it, starting with the superpowers brainstorming skill if it is installed (otherwise straight from the prompt, as the contract), finishing with the `<output>` report checked against `<acceptance>`.
+- **Hand it off**: `/helm:agent <name>` sends it to a saved agent in a new herdr pane; `/helm:agent` defines a new agent for it first; `/helm:agent list` shows the saved ones.
