@@ -1,0 +1,1 @@
+Without changing any code: how is the late fee on an overdue invoice computed, and where does its rate come from? Write the answer to ANSWER.md in at most 8 lines, naming the file and function involved, the default rate, and the grace period.

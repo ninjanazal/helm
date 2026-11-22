@@ -1,0 +1,1 @@
+Add a function `snake_case <text>` to src/strutil.sh: lowercase, each run of non-alphanumeric characters becomes a single "_", with no leading or trailing "_". For example `snake_case 'Hello, World-Foo'` prints `hello_world_foo`. Add a test for it in tests/strutil_test.sh and keep `sh test.sh` passing.

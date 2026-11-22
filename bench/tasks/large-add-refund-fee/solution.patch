@@ -1,0 +1,26 @@
+diff --git a/src/payments/fees.sh b/src/payments/fees.sh
+index d0d067c..21eedde 100644
+--- a/src/payments/fees.sh
++++ b/src/payments/fees.sh
+@@ -4,3 +4,11 @@
+ payments_fee() {
+   printf '%s' $(( $1 * 29 / 1000 + 30 ))
+ }
++
++# payments_refund_fee <cents>: the payment fee, capped at 1000; 0 under 100 cents.
++payments_refund_fee() {
++  [ "$1" -lt 100 ] && { printf 0; return 0; }
++  f=$(payments_fee "$1")
++  [ "$f" -gt 1000 ] && f=1000
++  printf '%s' "$f"
++}
+diff --git a/tests/payments_test.sh b/tests/payments_test.sh
+index e96e76d..71719e9 100644
+--- a/tests/payments_test.sh
++++ b/tests/payments_test.sh
+@@ -3,4 +3,5 @@ assert_eq run 'x:ab' "$(printf '%s' "$(payments_create_run AB)" | sed 's/^paymen
+ assert_eq check-empty 1 "$(payments_validate_check '' && echo 0 || echo 1)"
+ assert_eq label 'payments export' "$(payments_export_label)"
+ assert_eq fee 320 "$(payments_fee 10000)"
++assert_eq refund-cap 1000 "$(payments_refund_fee 1000000)"
+ finish

@@ -1,0 +1,9 @@
+diff --git a/ANSWER.md b/ANSWER.md
+new file mode 100644
+--- /dev/null
++++ b/ANSWER.md
+@@ -0,0 +1,4 @@
++`late_fee` in src/billing.sh multiplies the invoice amount by `fee_rate` / 100.
++`fee_rate` (src/config.sh) returns `LATE_FEE_PCT`, which defaults to 7 (percent).
++No fee is charged while days overdue is within `GRACE_DAYS` (default 5).
++`invoice_total` adds the fee to the amount.

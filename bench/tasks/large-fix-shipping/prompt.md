@@ -1,0 +1,1 @@
+A 20.5 kg parcel is quoted 500 cents, but shipping charges 30 cents for every started kilogram above 20 kg, so it should be 530 (21 kg: 530, 21.001 kg: 560). Find where shipping prices are computed and fix it. Keep `sh test.sh` passing.

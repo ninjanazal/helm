@@ -46,6 +46,27 @@ From GitHub, without cloning: `/plugin install helm --marketplace ninjanazal/hel
 - `/helm:agent <name>` opens a new herdr tab labelled `<name>` (in the background) and runs `claude --agent <name>` there on the task in `.claude/helm/task.md` (git-ignored). The tab gets `HELM_AGENT=<name>`: no deck there, no nested agents.
 - Needs [herdr](https://herdr.dev); `/helm:agent list` works without it.
 
+## 📊 Bench
+
+Does helm pay off? `make bench` runs a fixed task suite with headless `claude -p`, once with helm and once without, and compares the two.
+
+```
+make bench                              # all tasks, 3 runs per arm: 8 tasks x 2 arms x 3 = 48 paid claude calls
+make bench TASKS=fix-truncate RUNS=1    # one task, one run per arm
+make bench DRY=1                        # list task x arm x run, call nothing, spend nothing
+make bench REPORT=1                     # only print the table from bench/results.jsonl
+make bench MODEL=haiku EFFORT=low       # defaults: sonnet, medium
+sh bench/test.sh                        # free self-test: every check fails on the fixture and passes with its solution.patch
+```
+
+- **Tasks** (`bench/tasks/*`): a bug fix, a small feature, a refactor and a find-and-explain, all on `bench/fixture/` (a small POSIX sh library, `sh test.sh`). Each has `prompt.md`, a `check.sh` (exit 0 = pass) and a `solution.patch`.
+- **Large fixture:** the `large-*` tasks run on `bench/fixture-large/` (about 120 files; `sh bench/gen-large.sh` regenerates it). In their helm arm only, the copy is indexed with atlas (`index_ms` in the row) and the atlas MCP server is on; rows also carry `atlas_queries` and `atlas_avoided`. The report groups by model and fixture.
+- **Isolation:** each run gets a fresh copy of the fixture in a temp dir. Both arms use the same flags and enable superpowers (helm's dependency); only the helm arm adds `--plugin-dir`. `--setting-sources project`, `--strict-mcp-config` and `--no-session-persistence` keep your user settings, plugins, MCP servers and sessions out of the runs.
+- **Results:** one JSONL row per run in `bench/results.jsonl` (date, sha, model, task, arm, run, pass, token counts, `cost_usd`, `duration_ms`, turns). Rows from a dirty tree get a `-dirty` sha. The file is yours to commit or not; `bench/results.sample.jsonl` holds invented numbers that only demo the report.
+- **Report:** per model, per task and TOTAL: pass (runs passed/run), and the median tokens (input + output + cache read + cache creation), cost (the engine's estimate) and wall time, for helm and baseline, the delta (helm - baseline), delta %, and the same delta % for the previous sha, to see whether helm got better or worse. TOTAL sums the task medians.
+- **Costs:** about $0.05-0.11 per run on sonnet, so roughly $3 for a full run; each run is capped at `BUDGET=1` USD. Needs `claude` and `jq`.
+- **Limits:** 4 small tasks and 3 runs is a smoke signal, not statistics; compare only runs with the same model; the model decides whether to call atlas, so on small repos it often doesn't; drift and `/helm:prompt` are not measured; runs use `acceptEdits` plus Bash in a throwaway dir, so they can run commands.
+
 ## 🛠️ Developing
 
 ```

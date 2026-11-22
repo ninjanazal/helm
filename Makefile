@@ -5,9 +5,11 @@ HELM := sh scripts/helm.sh
 .DEFAULT_GOAL := help
 # Optional presets, passed through to the script: SCOPE=local|user FROM=here|github DIR=<repo> PIECES="…" HELM_YES=1
 export SCOPE FROM DIR PIECES HELM_YES
+# make bench options: TASKS="a b" RUNS=3 MODEL=sonnet EFFORT=medium DRY=1 (list only) REPORT=1 (report only)
+export TASKS RUNS MODEL EFFORT DRY REPORT
 
-.PHONY: help setup remove status index check
-help setup remove status index check:
+.PHONY: help setup remove status index check bench
+help setup remove status index check bench:
 	@$(HELM) $@
 
 # Old names: still work without questions, and say what replaced them.

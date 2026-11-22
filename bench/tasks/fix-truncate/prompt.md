@@ -1,0 +1,1 @@
+`truncate_str` in src/strutil.sh returns text longer than the limit it is given: `truncate_str 'hello world' 8` should be at most 8 characters long, ending in "..." when it cut something. Fix the bug and keep `sh test.sh` passing.

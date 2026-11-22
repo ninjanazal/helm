@@ -1,6 +1,6 @@
 #!/bin/sh
 # helm setup script: the make targets call this. Asks where and what when a person is there to answer.
-#   sh scripts/helm.sh help|setup|remove|status|index|check
+#   sh scripts/helm.sh help|setup|remove|status|index|check|bench
 #   non-interactive (used by the old make names): install|uninstall <piece>, update, enable, disable, test, validate
 # Presets, all optional: SCOPE=local|user  FROM=here|github  DIR=<repo>  PIECES="helm superpowers atlas herdr"  HELM_YES=1
 
@@ -211,6 +211,11 @@ cmd_test() {
   [ -n "$HELM_IN_TEST" ] || tailed 1 sh "$ROOT/scripts/helm.test.sh" || exit 1
 }
 cmd_check() { cmd_validate && cmd_test; }
+# bench: A/B helm vs baseline on the fixture tasks. TASKS= RUNS= MODEL= EFFORT= DRY=1 REPORT=1 (report only).
+cmd_bench() {
+  [ -n "$REPORT" ] || { sh "$ROOT/bench/run.sh" || exit 1; }
+  [ -n "$DRY" ] || sh "$ROOT/bench/report.sh"
+}
 
 cmd_help() {
   version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$ROOT/.claude-plugin/plugin.json" | head -1)
@@ -220,13 +225,14 @@ cmd_help() {
   printf '    %smake status%s   what is installed, and where\n' "$C" "$R"
   printf '    %smake index%s    build or refresh the atlas index of this repo\n' "$C" "$R"
   printf '    %smake check%s    validate the plugin and run the tests\n' "$C" "$R"
+  printf '    %smake bench%s    A/B helm vs baseline on a fixed task suite %s(spends API credits; DRY=1 lists the runs)%s\n' "$C" "$R" "$D" "$R"
   printf '\n  %sThen in Claude Code: /reload-plugins, then /helm:help%s\n\n' "$D" "$R"
 }
 
 verb=${1:-help}; [ $# -gt 0 ] && shift
 case $SCOPE in global) SCOPE=user;; esac
 case $verb in
-  help|setup|remove|status|index|check|update|enable|disable|test|validate) "cmd_$verb" ;;
+  help|setup|remove|status|index|check|bench|update|enable|disable|test|validate) "cmd_$verb" ;;
   install|uninstall)
     case $1 in helm|superpowers|atlas|herdr|index) ;; *) die "usage: make help  (unknown piece: $1)";; esac
     SCOPE=${SCOPE:-local}; "${verb}_$1" ;;
