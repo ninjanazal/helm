@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>helm deck: 10 usage chart options</title>
+<style>
+  :root { --bg:#16161a; --pane:#1e1e24; --line:#2c2c35; --text:#e6e6ea; --dim:#8a8a96;
+    --claude:#d97757; --success:#4eba65; --warning:#e5b93c; --error:#ff6b80; --suggestion:#b1b9f9; --subtle:#5c5c68; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, sans-serif; padding:24px; }
+  header { max-width:1200px; margin:0 auto 20px; display:flex; flex-wrap:wrap; gap:12px 24px; align-items:end; justify-content:space-between; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  header p { margin:0; color:var(--dim); max-width:640px; }
+  .ctl { display:flex; gap:8px; }
+  button { background:var(--pane); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+  button[aria-pressed="true"] { border-color:var(--claude); color:var(--claude); }
+  main { max-width:1200px; margin:0 auto; display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 460px), 1fr)); gap:16px; }
+  .card { background:var(--pane); border:1px solid var(--line); border-radius:10px; padding:14px 16px 16px; }
+  .card h2 { font-size:15px; margin:0 0 2px; display:flex; gap:8px; align-items:baseline; }
+  .card h2 .n { color:var(--claude); font-variant-numeric:tabular-nums; }
+  .card .note { color:var(--dim); font-size:13px; margin:0 0 10px; min-height:2.9em; }
+  pre { margin:0; background:#111114; border:1px solid var(--line); border-radius:6px; padding:10px 12px; overflow-x:auto;
+    font:13px/1.25 "JetBrains Mono", "DejaVu Sans Mono", "Menlo", monospace; color:var(--text); }
+  .c-claude{color:var(--claude)} .c-success{color:var(--success)} .c-warning{color:var(--warning)} .c-error{color:var(--error)}
+  .c-suggestion{color:var(--suggestion)} .c-subtle{color:var(--subtle)} .c-dim{color:var(--dim)} .c-text{color:var(--text)}
+  .b { font-weight:700; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>◷ USAGE: 10 chart options</h1>
+    <p>Each card is the whole USAGE section as the deck pane would draw it, fed by the same simulated live data: context % per turn (with compaction drops) and the 5h limit % over time. Pick by number.</p>
+  </div>
+  <div class="ctl">
+    <button id="wide" aria-pressed="true">Pane 46 cols</button>
+    <button id="narrow" aria-pressed="false">Pane 32 cols</button>
+    <button id="pause" aria-pressed="false">Pause</button>
+  </div>
+</header>
+<main id="grid"></main>
+<script>
+// ── simulated data ───────────────────────────────────────
+const MAX = 120
+const ctx = [], five = []
+let c = 8, f = 4, tick = 0, cost = 0.12, tok = 18000, resetIn = 72 * 60
+function step() {
+  tick++
+  f += 0.25 + Math.random() * 0.9
+  if (f >= 99) f = 2, resetIn = 5 * 3600
+  five.push(f); if (five.length > MAX) five.shift()
+  resetIn = Math.max(60, resetIn - 20)
+  if (tick % 3 === 0) {
+    c += 1.5 + Math.random() * 5
+    if (c > 84) c = 22 + Math.random() * 6
+    ctx.push(c); if (ctx.length > MAX) ctx.shift()
+    cost += 0.02 + Math.random() * 0.06; tok += 4000 + Math.random() * 12000
+  }
+}
+for (let i = 0; i < 150; i++) step()
+
+// ── helpers ──────────────────────────────────────────────
+const level = p => p >= 80 ? 'error' : p >= 50 ? 'warning' : 'success'
+const last = a => a[a.length - 1] ?? 0
+const fmtDur = s => { const m = Math.round(s / 60); return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m` }
+const fmtTok = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : Math.round(n / 1000) + 'k'
+const S = (t, c, b) => ({ t, c, b })
+const pad = (t, n) => t + ' '.repeat(Math.max(0, n - t.length))
+const esc = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+const html = lines => lines.map(l => l.map(s => s.c || s.b ? `<span class="${s.c ? 'c-' + s.c : ''}${s.b ? ' b' : ''}">${esc(s.t)}</span>` : esc(s.t)).join('')).join('\n')
+
+// Dot canvas: braille (2×4 dots per cell) or quadrant blocks (2×2).
+const BRAILLE = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]]
+const QUAD = ' ▘▝▀▖▌▞▛▗▚▐▜▄▙▟█'
+function canvas(w, h, mode = 'braille') {
+  const dy = mode === 'braille' ? 4 : 2
+  const bits = new Array(w * h).fill(0), col = new Array(w * h).fill(null)
+  const pw = w * 2, ph = h * dy
+  const set = (x, y, c) => {
+    x = Math.round(x); y = Math.round(y)
+    if (x < 0 || y < 0 || x >= pw || y >= ph) return
+    const i = (y / dy | 0) * w + (x >> 1)
+    bits[i] |= mode === 'braille' ? BRAILLE[x & 1][y & 3] : [[1, 4], [2, 8]][x & 1][y & 1]
+    col[i] = col[i] && col[i] !== c ? 'text' : c
+  }
+  const yOf = v => ph - 1 - Math.round(Math.min(100, Math.max(0, v)) / 100 * (ph - 1))
+  const seg = (x0, y0, x1, y1, c) => {
+    const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1)
+    for (let k = 0; k <= n; k++) set(x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n, c)
+  }
+  // newest sample at the right edge
+  const plot = (vals, c, { fill = false, tone = false } = {}) => {
+    const v = vals.slice(-pw), x0 = pw - v.length
+    v.forEach((p, i) => {
+      const cc = tone ? level(p) : c, y = yOf(p)
+      if (i) seg(x0 + i - 1, yOf(v[i - 1]), x0 + i, y, cc); else set(x0, y, cc)
+      if (fill) for (let yy = y + 1; yy < ph; yy++) set(x0 + i, yy, cc)
+    })
+  }
+  const dotted = (v, c, every = 3) => { const y = yOf(v); for (let x = 0; x < pw; x += every) set(x, y, c) }
+  const lines = () => {
+    const out = []
+    for (let r = 0; r < h; r++) {
+      const l = []
+      for (let x = 0; x < w; x++) {
+        const i = r * w + x, b = bits[i]
+        const ch = b ? (mode === 'braille' ? String.fromCharCode(0x2800 + b) : QUAD[b]) : ' '
+        const cc = b ? col[i] : null
+        if (l.length && l[l.length - 1].c === cc) l[l.length - 1].t += ch; else l.push(S(ch, cc))
+      }
+      out.push(l)
+    }
+    return out
+  }
+  return { plot, dotted, set, yOf, pw, ph, lines }
+}
+
+const title = () => [S('◷ USAGE', 'suggestion', true)]
+const head = (label, p, extra = []) => [S(label + ' ', 'dim'), S(Math.round(p) + '%', level(p), true), ...extra]
+const reset = W => W >= 40 ? [S(`  ↻${fmtDur(resetIn)}`, 'dim')] : []
+const week = (W) => { const p = 34, n = Math.max(6, W - 12), k = Math.round(p / 100 * n); return [S(pad('week', 7), 'dim'), S('━'.repeat(k), level(p)), S('─'.repeat(n - k), 'subtle'), S(` ${p}%`, level(p), true)] }
+const foot = () => [S(`$${cost.toFixed(2)} · ${fmtTok(tok)} tok`, 'dim')]
+const H = W => W < 40 ? 2 : 3
+
+// ── the 10 options ───────────────────────────────────────
+const OPTIONS = [
+  { name: 'Braille line', note: 'Thin line, 2×4 dots per cell, coloured by the latest level. Most detail per row.',
+    draw(W) { const a = canvas(W, H(W)), b = canvas(W, H(W)); a.plot(ctx, level(last(ctx))); b.plot(five, level(last(five)))
+      return [title(), head('context', last(ctx)), ...a.lines(), head('5h', last(five), reset(W)), ...b.lines(), week(W), foot()] } },
+  { name: 'Braille area', note: 'Same line, filled underneath. Reads as "how full" better than a bare line.',
+    draw(W) { const a = canvas(W, H(W)), b = canvas(W, H(W)); a.plot(ctx, level(last(ctx)), { fill: true }); b.plot(five, level(last(five)), { fill: true })
+      return [title(), head('context', last(ctx)), ...a.lines(), head('5h', last(five), reset(W)), ...b.lines(), week(W), foot()] } },
+  { name: 'Box-drawing line + y-axis', note: 'asciichart look: ╭─╯ with a 0/50/100 scale. Clear, but coarse: one row per step.',
+    draw(W) {
+      const chart = (vals, h) => {
+        const cols = W - 5, v = vals.slice(-cols), g = Array.from({ length: h }, () => new Array(cols).fill(' '))
+        const r = p => Math.round(p / 100 * (h - 1)), x0 = cols - v.length
+        v.forEach((p, i) => { if (!i) return
+          const y0 = r(v[i - 1]), y1 = r(p), x = x0 + i
+          if (y0 === y1) g[y0][x] = '─'
+          else if (y1 > y0) { g[y0][x] = '╯'; g[y1][x] = '╭'; for (let y = y0 + 1; y < y1; y++) g[y][x] = '│' }
+          else { g[y0][x] = '╮'; g[y1][x] = '╰'; for (let y = y1 + 1; y < y0; y++) g[y][x] = '│' } })
+        const lab = y => y === h - 1 ? '100' : y === 0 ? '  0' : y === Math.round((h - 1) / 2) ? ' 50' : '   '
+        const out = []; for (let y = h - 1; y >= 0; y--) out.push([S(lab(y) + (y === 0 ? '┼' : '┤'), 'subtle'), S(g[y].join(''), level(last(vals)))]); return out }
+      const h = W < 40 ? 3 : 5
+      return [title(), head('context', last(ctx)), ...chart(ctx, h), head('5h', last(five), reset(W)), ...chart(five, h), week(W), foot()] } },
+  { name: 'Block sparkline', note: 'One row each, ▁▂▃▅▇ inline with the label. Most compact; whole section in 5 lines.',
+    draw(W) {
+      const spark = (vals, n) => vals.slice(-n).map(p => S('▁▂▃▄▅▆▇█'[Math.min(7, Math.floor(p / 12.5))], level(p)))
+      const n = W - 13, row = (l, v, x = []) => [S(pad(l, 8), 'dim'), ...spark(v, n), S(' ' + pad(Math.round(last(v)) + '%', 4), level(last(v)), true), ...x]
+      return [title(), row('context', ctx), row('5h', five), ...(W >= 40 ? [[S(pad('', 8)), S(`resets in ${fmtDur(resetIn)}`, 'dim')]] : []), week(W), foot()] } },
+  { name: 'Column bars (⅛ blocks)', note: 'Vertical bars, 8 levels per row, each column coloured by its own level, so spikes stand out.',
+    draw(W) {
+      const bars = (vals, h) => { const v = vals.slice(-W), out = []
+        for (let r = h - 1; r >= 0; r--) out.push(v.map(p => { const u = Math.round(p / 100 * h * 8) - r * 8; return S(' ▁▂▃▄▅▆▇█'[Math.max(0, Math.min(8, u))], level(p)) }))
+        return out }
+      return [title(), head('context', last(ctx)), ...bars(ctx, H(W)), head('5h', last(five), reset(W)), ...bars(five, H(W)), week(W), foot()] } },
+  { name: 'Quadrant-block line', note: '▗▄▖ blocks, 2×2 per cell. Chunkier and bolder than braille; renders in fonts without braille.',
+    draw(W) { const a = canvas(W, H(W), 'quad'), b = canvas(W, H(W), 'quad'); a.plot(ctx, level(last(ctx))); b.plot(five, level(last(five)))
+      return [title(), head('context', last(ctx)), ...a.lines(), head('5h', last(five), reset(W)), ...b.lines(), week(W), foot()] } },
+  { name: 'One chart, two series', note: 'Context (orange) and 5h (blue) overlaid in one braille chart with a legend. Saves rows; crossings show white.',
+    draw(W) { const a = canvas(W, W < 40 ? 3 : 4); a.plot(ctx, 'claude'); a.plot(five, 'suggestion')
+      return [title(), [S('■ ', 'claude'), ...head('context', last(ctx)), S('   '), S('■ ', 'suggestion'), ...head('5h', last(five), reset(W))], ...a.lines(), week(W), foot()] } },
+  { name: 'Heat strip', note: 'One row each of ░▒▓█ shades by value. Shows the rhythm, not the shape; very calm.',
+    draw(W) {
+      const strip = (vals, n) => vals.slice(-n).map(p => S('·░▒▓█'[Math.min(4, Math.floor(p / 20))], level(p)))
+      const n = W - 13, row = (l, v) => [S(pad(l, 8), 'dim'), ...strip(v, n), S(' ' + Math.round(last(v)) + '%', level(last(v)), true)]
+      return [title(), row('context', ctx), row('5h', five), week(W), foot()] } },
+  { name: 'Meter + braille trail', note: 'Keeps today\'s meter, adds a short 1-row braille trail of recent history beside it.',
+    draw(W) {
+      const row = (l, v) => { const tw = Math.floor(W * 0.3), mw = W - tw - 14, p = last(v), k = Math.round(p / 100 * mw), t = canvas(tw, 1); t.plot(v, level(p))
+        return [S(pad(l, 8), 'dim'), S('━'.repeat(k), level(p)), S('─'.repeat(mw - k), 'subtle'), S(' ' + pad(Math.round(p) + '%', 4), level(p), true), S(' '), ...t.lines()[0]] }
+      return [title(), row('context', ctx), row('5h', five), ...(W >= 40 ? [[S(pad('', 8)), S(`resets in ${fmtDur(resetIn)}`, 'dim')]] : []), week(W), foot()] } },
+  { name: 'Line + forecast', note: 'Braille line plus dotted guides: compaction zone on context, pace projection to 100% on 5h. Answers "will I hit it?".',
+    draw(W) {
+      const h = H(W), a = canvas(W, h), b = canvas(W, h)
+      a.dotted(80, 'subtle', 3); a.plot(ctx, level(last(ctx)))
+      // 5h: history in the left 2/3, dotted projection from the recent slope
+      const hist = five.slice(-Math.floor(b.pw * 2 / 3)), x0 = 0
+      hist.forEach((p, i) => { if (i) { const n = 3; for (let k = 0; k <= n; k++) b.set(x0 + i - 1 + k / n, b.yOf(hist[i - 1]) + (b.yOf(p) - b.yOf(hist[i - 1])) * k / n, level(p)) } })
+      const k = 12, slope = (last(hist) - hist[Math.max(0, hist.length - k)]) / Math.min(k, hist.length - 1 || 1)
+      let p = last(hist), hit
+      for (let x = hist.length; x < b.pw; x++) { p += slope; if (p >= 100) { hit = x - hist.length; break } if (x % 2) b.set(x, b.yOf(p), 'dim') }
+      b.dotted(100, 'error', 4)
+      const eta = hit !== undefined ? [S(`  → 100% in ${fmtDur(hit * 20)}`, 'error')] : [S('  ✔ under at reset', 'success')]
+      return [title(), head('context', last(ctx), W >= 40 ? [S('  ┄ compacts ~80%', 'dim')] : []), ...a.lines(), head('5h', last(five), W >= 40 ? eta : []), ...b.lines(), week(W), foot()] } },
+]
+
+// ── render ───────────────────────────────────────────────
+const grid = document.getElementById('grid')
+const pres = OPTIONS.map((o, i) => {
+  const card = document.createElement('section'); card.className = 'card'
+  card.innerHTML = `<h2><span class="n">${i + 1}</span>${o.name}</h2><p class="note">${o.note}</p><pre></pre>`
+  grid.appendChild(card); return card.querySelector('pre')
+})
+let W = 46, paused = false
+const render = () => OPTIONS.forEach((o, i) => { pres[i].innerHTML = html(o.draw(W)) })
+const btn = id => document.getElementById(id)
+btn('wide').onclick = () => { W = 46; btn('wide').ariaPressed = 'true'; btn('narrow').ariaPressed = 'false'; render() }
+btn('narrow').onclick = () => { W = 32; btn('wide').ariaPressed = 'false'; btn('narrow').ariaPressed = 'true'; render() }
+btn('pause').onclick = () => { paused = !paused; btn('pause').ariaPressed = String(paused); btn('pause').textContent = paused ? 'Resume' : 'Pause' }
+render()
+setInterval(() => { if (!paused) { step(); render() } }, 700)
+</script>
+</body>
+</html>
