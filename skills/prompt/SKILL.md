@@ -106,3 +106,6 @@ Then stop and say, in one line, that it is saved and that "go" starts it here: i
 brainstorming then writing-plans first (otherwise straight from the prompt, as the contract), finishing with
 the `<output>` report checked against `<acceptance>`. If the prompt has a `<split>`, "go" dispatches its units
 to sub agents (parallel where independent) instead of doing them in the host.
+The deck shows the `<acceptance>` items as checks: while working on "go", call `mcp__helm__deck` with
+`{ "action": "check", "n": <item, from 1>, "state": "working" }` when you start verifying an item and
+`"state": "done"` once its check passes, so the deck shows progress toward done.
