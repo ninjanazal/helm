@@ -4,6 +4,7 @@ description: Show the helm guide - the deck pane and every /helm command. Use wh
 ---
 
 Show the person the guide below as it is, then offer to answer any question about it. Do not call tools.
+If no `superpowers:*` skills are in your skill list, add one line after it: "superpowers is not installed: helm works without it; add it with `make superpowers SCOPE=local|user`."
 
 # ⎈ helm
 

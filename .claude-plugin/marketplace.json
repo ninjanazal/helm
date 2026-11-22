@@ -2,6 +2,7 @@
   "name": "helm",
   "owner": { "name": "Eurico Martins" },
   "description": "Claude Code plugins by Eurico Martins.",
+  "allowCrossMarketplaceDependenciesOn": ["claude-plugins-official"],
   "plugins": [
     {
       "name": "helm",

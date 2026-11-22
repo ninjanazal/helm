@@ -94,7 +94,7 @@ export async function getTask(io: Io, root: string): Promise<string | undefined>
 }
 
 export function handoffPrompt(): string {
-  return `Read ${TASK_FILE}: it is your task, already approved. Start with the superpowers brainstorming skill if it is available, then plan and build it.`
+  return `Read ${TASK_FILE}: it is your task, already approved. Start with the superpowers brainstorming skill if it is available, then plan with writing-plans and build with executing-plans or subagent-driven-development.`
 }
 
 export type LaunchCtx = { root: string; home?: string; herdr: Herdr | null; agentEnv?: string }

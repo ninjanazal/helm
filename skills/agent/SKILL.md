@@ -26,3 +26,5 @@ Call `mcp__helm__agent_launch` with `{ "name": "<name>" }` and show its reply as
 4. Show the draft in one block, then ask in one line: "Save it as `<name>`, change something, or rename?"
 5. On approval call `mcp__helm__agent_save` with the fields. If the name exists, ask before passing `overwrite: true`.
 6. Call `mcp__helm__agent_launch` with the name and show its reply as is. Outside herdr it says so; the agent stays saved for later.
+
+If superpowers is installed, the launched agent follows writing-plans, then executing-plans or subagent-driven-development (the hand-off prompt says so).

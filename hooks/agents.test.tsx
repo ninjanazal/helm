@@ -78,7 +78,7 @@ test('launch: happy path opens a named tab and runs the agent on the task file',
   const r = await launchAgent(io, { root: '/p', home: '/h', herdr: H }, 'reviewer')
   expect(r).toEqual({ text: 'Started reviewer in a new tab "reviewer" (pane wC:p3).', isError: false })
   expect(runs).toEqual([tabArgv(H, '/p', 'reviewer'), runArgv(H, 'wC:p3', 'reviewer', handoffPrompt())])
-  expect(handoffPrompt()).toBe('Read .claude/helm/task.md: it is your task, already approved. Start with the superpowers brainstorming skill if it is available, then plan and build it.')
+  expect(handoffPrompt()).toBe('Read .claude/helm/task.md: it is your task, already approved. Start with the superpowers brainstorming skill if it is available, then plan with writing-plans and build with executing-plans or subagent-driven-development.')
 })
 
 test('launch refuses without a task, outside herdr, inside an agent, or for an unknown name; nothing runs', async () => {

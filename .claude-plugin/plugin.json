@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Steer Claude Code sessions: a live deck pane, a prompt builder, agents handed tasks in herdr panes, and atlas, a local code graph.",
   "license": "MIT",
+  "dependencies": ["superpowers@claude-plugins-official"],
   "types": "./types/index.d.ts",
   "author": {
     "name": "Eurico Martins"

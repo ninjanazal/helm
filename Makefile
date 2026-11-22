@@ -81,6 +81,7 @@ doctor: ## Show what is installed, where, and what to run next
 	@for p in '$(ID)' '$(SP)'; do \
 	  s=$$($(CLAUDE) plugin list 2>/dev/null | grep -A3 "$$p" | sed -n 's/.*Scope: *//p' | sort -u | tr '\n' ' '); \
 	  [ -n "$$s" ] && printf '  $(G)✔$(R) %-36s $(D)%s$(R)\n' "$$p" "$$s" || printf '  $(Y)○$(R) %-36s $(D)not installed$(R)\n' "$$p"; done
+	@$(CLAUDE) plugin list 2>/dev/null | grep -A3 '$(SP)' | grep -q 'Status:.*enabled' || printf '  $(D)superpowers is off: helm skills skip their workflow steps. Add it: make superpowers SCOPE=local|user$(R)\n'
 	@command -v herdr >/dev/null && printf '  $(G)✔$(R) %-36s $(D)%s$(R)\n' herdr "$$(herdr --version 2>/dev/null)" || printf '  $(Y)○$(R) %-36s $(D)not found (optional)$(R)\n' herdr
 	@for sc in local user; do b=$$([ $$sc = local ] && echo '$(BIN_local)' || echo '$(BIN_user)'); \
 	  [ -x $$b/atlas ] && printf '  $(G)✔$(R) %-36s $(D)%s$(R)\n' "atlas binary ($$sc)" "$$b/atlas" || printf '  $(D)○ %-36s make atlas SCOPE=%s$(R)\n' "atlas binary ($$sc)" $$sc; done
