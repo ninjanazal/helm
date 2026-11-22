@@ -101,6 +101,7 @@ export type LaunchCtx = { root: string; home?: string; herdr: Herdr | null; agen
 
 /** Opens a herdr tab named after the agent and starts `claude --agent <name>` on the task file. */
 export async function launchAgent(io: Io, ctx: LaunchCtx, name: string): Promise<Answer> {
+  if (!NAME_RE.test(name)) return { text: `Error: "${name}" is not a valid agent name (lowercase letters, digits and -).`, isError: true }
   if (ctx.agentEnv?.trim()) return { text: `Error: this session is the helm agent ${ctx.agentEnv}; agents do not start other agents.`, isError: true }
   if (!ctx.herdr) return { text: 'Starting an agent needs herdr: run Claude Code inside herdr. Saved agents stay in .claude/agents/.', isError: false }
   if (!(await getTask(io, ctx.root))) return { text: 'There is no approved task yet. Run /helm:prompt <request> first, then /helm:agent.', isError: false }

