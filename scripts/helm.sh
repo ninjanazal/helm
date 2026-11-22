@@ -2,13 +2,13 @@
 # helm setup script: the make targets call this. Asks where and what when a person is there to answer.
 #   sh scripts/helm.sh help|setup|remove|status|index|check
 #   non-interactive (used by the old make names): install|uninstall <piece>, update, enable, disable, test, validate
-# Presets, all optional: SCOPE=local|user  FROM=here|github  DIR=<repo>  PIECES="helm superpowers atlas herdr"  YES=1
+# Presets, all optional: SCOPE=local|user  FROM=here|github  DIR=<repo>  PIECES="helm superpowers atlas herdr"  HELM_YES=1
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PLUGIN=helm MARKETPLACE=helm GITHUB=ninjanazal/helm
 ID=$PLUGIN@$MARKETPLACE
 SP=superpowers@claude-plugins-official
-ALL="helm superpowers atlas herdr"
+ALL="helm superpowers herdr atlas"
 BIN_local=$ROOT/.atlas/bin
 BIN_user=$HOME/.local/bin
 
@@ -93,7 +93,7 @@ need_claude() { has_claude || die "${Y}○${R} claude not found: install Claude 
 install_helm() {
   need_claude
   if at_scope "$ID"; then
-    claude plugin marketplace update "$MARKETPLACE" && claude plugin update "$ID" --scope "$SCOPE" && done_ "helm updated ($SCOPE)"
+    done_ "helm already installed ($SCOPE)"
   else
     claude plugin install "$PLUGIN" --marketplace "$(source_)" --scope "$SCOPE" && done_ "helm installed ($SCOPE)"
   fi
@@ -104,14 +104,13 @@ install_superpowers() {
   else claude plugin install "$SP" --scope "$SCOPE" && done_ "superpowers installed ($SCOPE)"; fi
 }
 install_atlas() {
-  command -v cargo >/dev/null 2>&1 || die "${Y}○${R} cargo not found: install Rust via rustup, then re-run."
+  command -v cargo >/dev/null 2>&1 || { say "${Y}○${R} cargo not found: install Rust via rustup, then re-run."; return 1; }
   need_claude
   bin=$(bin_dir)
-  cargo install --path "$ROOT/atlas" --root "$(dirname "$bin")" --quiet --force || exit 1
+  cargo install --path "$ROOT/atlas" --root "$(dirname "$bin")" --quiet --force || return 1
   claude mcp remove --scope "$SCOPE" atlas >/dev/null 2>&1 || true
-  claude mcp add --scope "$SCOPE" atlas -- "$bin/atlas" mcp >/dev/null || exit 1
+  claude mcp add --scope "$SCOPE" atlas -- "$bin/atlas" mcp >/dev/null || return 1
   done_ "atlas ($SCOPE) → $bin/atlas, MCP server registered"
-  [ "$SCOPE" = local ] && cmd_index
   [ "$SCOPE" = user ] && say "  ${D}atlas indexes a repo the first time its tools are used, or run: make index${R}"
   return 0
 }
@@ -137,11 +136,11 @@ uninstall_index() { rm -rf "${DIR:-$ROOT}"/.atlas/graph.db* && done_ 'index remo
 
 # helm already installed: offer what else can be done with it.
 helm_action() {
-  at_scope "$ID" && interactive || { install_helm; return; }
+  at_scope "$ID" && interactive || { install_helm; return; }  # no one to ask: install, or leave as is
   say ''; say "${B}helm is installed ($SCOPE).${R} 1) update (default)  2) disable  3) enable  4) leave"
   while :; do
     printf '> '; read -r a || a=
-    case $a in ''|1) install_helm; return;; 2) cmd_disable; return;; 3) cmd_enable; return;; 4) return;;
+    case $a in ''|1) cmd_update; return;; 2) cmd_disable; return;; 3) cmd_enable; return;; 4) return;;
       *) say "${Y}not a choice:${R} $a";; esac
   done
 }
@@ -151,18 +150,20 @@ cmd_setup() {
   ask_scope; ask_pieces
   for p in $PIECES; do
     step "$(piece_label $p) · $(scope_word $SCOPE)"
-    case $p in helm) helm_action;; *) "install_$p";; esac
+    case $p in helm) helm_action;; *) "install_$p";; esac || failed="$failed $p"
+    [ "$p" = atlas ] && [ "$SCOPE" = local ] && ! echo "$failed" | grep -qw atlas && { cmd_index || failed="$failed index"; }
   done
+  [ -n "$failed" ] && die "${Y}✘${R} failed:$failed (see above)"
   printf '\n%s✔ Done.%s In Claude Code: %s/reload-plugins%s, then %s/helm:deck%s.\n' "$G" "$R" "$B" "$R" "$B" "$R"
 }
 
 cmd_remove() {
-  if ! interactive && [ -z "$YES" ]; then
+  if ! interactive && [ -z "$HELM_YES" ]; then
     die "${Y}○${R} make remove asks what to remove; run it in a terminal."
   fi
   printf '\n  %s⎈ %shelm remove%s\n' "$M" "$B" "$R"
   ask_scope; ask_pieces
-  if [ -z "$YES" ]; then
+  if [ -z "$HELM_YES" ]; then
     printf '\nRemove%s from %s? [y/N] ' "$(for p in $PIECES; do printf ' %s' "$(piece_label $p)"; done)" "$(scope_word $SCOPE)"
     read -r a || a=
     case $a in y|Y|yes) ;; *) say 'Nothing removed.'; return 0;; esac
@@ -197,11 +198,17 @@ cmd_update() { need_claude; claude plugin marketplace update "$MARKETPLACE" && c
 cmd_enable() { need_claude; claude plugin enable "$ID" --scope "${SCOPE:-local}" && say "${G}✔${R} Enabled. Run ${B}/reload-plugins${R} in Claude Code."; }
 cmd_disable() { need_claude; claude plugin disable "$ID" --scope "${SCOPE:-local}"; }
 cmd_validate() { need_claude; claude plugin validate "$ROOT"; }
+# tailed <n> <cmd…>: run it, show the last n lines (all of it on failure), keep its exit status.
+tailed() {
+  n=$1; shift; out=$("$@" 2>&1); rc=$?
+  [ $rc -eq 0 ] && printf '%s\n' "$out" | tail -"$n" || printf '%s\n' "$out"
+  return $rc
+}
 cmd_test() {
   need_claude
   (cd "$ROOT" && claude plugin test .) || exit 1
-  cargo test -q --manifest-path "$ROOT/atlas/Cargo.toml" 2>&1 | tail -2
-  sh "$ROOT/scripts/helm.test.sh" | tail -1
+  tailed 2 cargo test -q --manifest-path "$ROOT/atlas/Cargo.toml" || exit 1
+  [ -n "$HELM_IN_TEST" ] || tailed 1 sh "$ROOT/scripts/helm.test.sh" || exit 1
 }
 cmd_check() { cmd_validate && cmd_test; }
 

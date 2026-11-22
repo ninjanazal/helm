@@ -3,8 +3,8 @@
 
 HELM := sh scripts/helm.sh
 .DEFAULT_GOAL := help
-# Optional presets, passed through to the script: SCOPE=local|user FROM=here|github DIR=<repo> PIECES="…" YES=1
-export SCOPE FROM DIR PIECES YES
+# Optional presets, passed through to the script: SCOPE=local|user FROM=here|github DIR=<repo> PIECES="…" HELM_YES=1
+export SCOPE FROM DIR PIECES HELM_YES
 
 .PHONY: help setup remove status index check
 help setup remove status index check:
@@ -24,10 +24,10 @@ global:
 	@SCOPE=user PIECES='helm superpowers herdr atlas' $(HELM) setup
 unlocal:
 	$(call now,remove)
-	@SCOPE=local PIECES='helm superpowers atlas' YES=1 $(HELM) remove
+	@SCOPE=local PIECES='helm superpowers atlas' HELM_YES=1 $(HELM) remove
 unglobal:
 	$(call now,remove)
-	@SCOPE=user PIECES='helm superpowers atlas' YES=1 $(HELM) remove
+	@SCOPE=user PIECES='helm superpowers atlas' HELM_YES=1 $(HELM) remove
 doctor:
 	$(call now,status)
 	@$(HELM) status

@@ -4,10 +4,10 @@ cd "$(dirname "$0")/.." || exit 1
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/bin"
 for c in claude cargo atlas; do
-  printf '#!/bin/sh\necho "%s $*" >> "%s/calls"\n' "$c" "$T" > "$T/bin/$c"; chmod +x "$T/bin/$c"
+  printf '#!/bin/sh\necho "%s $*" >> "%s/calls"\n[ "$1 $2" = "plugin list" ] && cat "%s/list" 2>/dev/null\ncase "%s $*" in $STUB_FAIL) exit 1;; esac\nexit 0\n' "$c" "$T" "$T" "$c" > "$T/bin/$c"; chmod +x "$T/bin/$c"
 done
-export PATH="$T/bin:$PATH" ATLAS="$T/bin/atlas" NO_COLOR=1
-unset SCOPE FROM DIR PIECES YES
+export PATH="$T/bin:$PATH" ATLAS="$T/bin/atlas" NO_COLOR=1 HELM_IN_TEST=1
+unset SCOPE FROM DIR PIECES HELM_YES STUB_FAIL
 fails=0; n=0
 ok()   { n=$((n+1)); printf 'ok   %s\n' "$1"; }
 bad()  { n=$((n+1)); fails=$((fails+1)); printf 'FAIL %s\n' "$1"; [ -f "$T/out" ] && sed 's/^/     | /' "$T/out"; }
@@ -47,6 +47,20 @@ reset; sh scripts/helm.sh bogus > "$T/out" 2>&1; e=$?
 
 reset; sh scripts/helm.sh help > "$T/out" 2>&1
 [ "$(wc -l < "$T/out")" -le 15 ] && ! has "$T/out" "$(printf '\033')" && ok 'help: short, no colour codes' || bad 'help: short, no colour codes'
+
+# review fixes
+reset; STUB_FAIL='claude plugin install helm*' PIECES=helm sh scripts/helm.sh setup < /dev/null > "$T/out" 2>&1; e=$?
+[ $e -ne 0 ] && ! has "$T/out" 'Done' && has "$T/out" 'failed' && ok 'setup: a failed install is reported and exits non-zero' || bad 'setup: a failed install is reported and exits non-zero'
+reset; STUB_FAIL='cargo test*' sh scripts/helm.sh test > "$T/out" 2>&1; e=$?
+[ $e -ne 0 ] && ok 'test: failing cargo tests fail the run' || bad 'test: failing cargo tests fail the run'
+printf 'helm@helm\n  Scope: local\n' > "$T/list"
+reset; SCOPE=local sh scripts/helm.sh install helm < /dev/null > "$T/out" 2>&1
+! has "$T/calls" 'plugin update' && has "$T/out" 'already installed' && ok 'install helm: installed means no-op' || bad 'install helm: installed means no-op'
+rm -f "$T/list"
+reset; SCOPE=local sh scripts/helm.sh install atlas < /dev/null > "$T/out" 2>&1
+! has "$T/calls" 'atlas index' && ok 'install atlas: does not index' || bad 'install atlas: does not index'
+reset; YES=1 sh scripts/helm.sh remove < /dev/null > "$T/out" 2>&1; e=$?
+[ $e -eq 1 ] && ! has "$T/calls" uninstall && ok 'remove: a stray YES does not skip asking' || bad 'remove: a stray YES does not skip asking'
 
 # make level: the targets, and the old names as quiet aliases.
 mk() { reset; make -s --no-print-directory "$@" < /dev/null > "$T/out" 2> "$T/err"; }
