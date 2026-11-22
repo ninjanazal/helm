@@ -109,6 +109,7 @@ test('launch: happy path makes the worktree, then opens the tab in it and runs t
   expect(prompt).toContain('Start with the superpowers brainstorming skill if it is available')
   expect(prompt).toContain('helm/reviewer')
   expect(prompt).toContain('/helm:agent merge reviewer')
+  expect(prompt).toContain('Merge: yes or no')
   expect(prompt).not.toContain('git push')
 })
 

@@ -96,7 +96,7 @@ export async function getTask(io: Io, root: string): Promise<string | undefined>
 export function handoffPrompt(taskPath = TASK_FILE, branch?: string, name?: string): string {
   const start = `Read ${taskPath}: it is your task, already approved. Start with the superpowers brainstorming skill if it is available, then plan with writing-plans and build with executing-plans or subagent-driven-development.`
   if (!branch || !name) return start
-  return `${start} You work on branch ${branch} in your own worktree: commit there, never push, never merge into the main tree. When done, message the session in $HELM_PARENT (if set) asking it to merge ${branch}, with a 3-line summary; otherwise end your report with "run /helm:agent merge ${name}". If told the merge conflicted, merge the main branch into ${branch}, resolve, commit and ask again.`
+  return `${start} You work on branch ${branch} in your own worktree: commit there, never push, never merge into the main tree. When done, message the session in $HELM_PARENT (if set) asking it to merge ${branch}, with a 3-line summary and your verdict as \"Merge: yes or no\" plus one line why (checks run and their result, scope kept, open questions); otherwise end your report with "run /helm:agent merge ${name}". If told the merge conflicted, merge the main branch into ${branch}, resolve, commit and ask again.`
 }
 
 /** Where agent `name` works: a sibling folder of the main tree, on its own branch. */
