@@ -22,7 +22,7 @@ Running this skill is the person's request to commit. Do not commit at any other
 - <next change>
 ```
 - **type**: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `build`, `ci`, `chore`, `style` or `revert`.
-- **scope**: optional, the area touched (`deck`, `agent`, `atlas`), lowercase. Leave it out when the change spans the repo.
+- **scope**: optional, the area touched (`deck`, `prompt`, `setup`), lowercase. Leave it out when the change spans the repo.
 - **subject**: imperative ("add", not "added"), lowercase start, no trailing period, at most 72 characters for the whole line.
 - **body**: a blank line, then one `- ` bullet per meaningful change: what and why, not how. Wrap at 72 characters. Skip the body for a one-line change that the subject already explains.
 - **breaking change**: `!` after the type or scope (`feat(agent)!: …`) and a final `BREAKING CHANGE: <what breaks>` line.

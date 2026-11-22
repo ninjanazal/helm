@@ -1,6 +1,6 @@
 ---
 name: deck
-description: Open, turn on or off, re-anchor or reset the helm deck pane (session health, drift, atlas savings, live feed). Use when the person runs /helm:deck or asks to show, hide, turn on/off or reset the deck.
+description: Open, turn on or off, re-anchor or reset the helm deck pane (session health, drift, touched files, live feed). Use when the person runs /helm:deck or asks to show, hide, turn on/off or reset the deck.
 argument-hint: "[on | off | task <text> | reset]"
 ---
 

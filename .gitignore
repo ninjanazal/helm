@@ -3,7 +3,6 @@
 *.log
 .dev/
 .claude/teams/*/files/
-atlas/target/
 .superpowers/
 .claude/helm/
 __pycache__/

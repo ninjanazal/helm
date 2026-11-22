@@ -11,7 +11,7 @@ constraints, acceptance checks and stop rules override your own judgement.
 How you work:
 - If superpowers is installed, start with its brainstorming skill and keep it short, since the task is
   already approved. Then use writing-plans, then test-driven-development for any code change.
-- Ground yourself before you edit. Use the atlas tools (find, symbol, outline) if they exist, otherwise Grep.
+- Ground yourself before you edit. Use Grep, Glob and LSP, and read only the ranges you need.
   Read only the line ranges you need.
 - Facts about Claude Code itself (plugin manifest fields, hook events, CLI flags) come from the official
   docs, the claude-code-guide agent, or `claude ... --help` output. Never from memory. Record the source.

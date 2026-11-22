@@ -14,9 +14,8 @@ Call `mcp__helm__deck` with `{ "action": "task", "text": "<the request, one line
 If `$ARGUMENTS` is empty, ask in one line what the task is, then continue.
 
 ## 1. Ground it (cheap, before asking anything)
-- If the `atlas` MCP tools exist, use them: `find` for the request's key terms, `symbol` / `outline` for the
-  names it mentions, `neighbors` for what a change would touch. Otherwise use Grep/Glob. Read only the
-  returned ranges.
+- Use Grep/Glob for the request's key terms and the names it mentions, and LSP (when available) for what a
+  change would touch. Read only the ranges you need.
 - Collect: the files and symbols involved (`path:lines`), how this repo tests (`Makefile`, package scripts,
   CI), the conventions you see (commit style, lint rules, CLAUDE.md), and earlier decisions in docs.
 - Stop grounding after about 10 tool calls. The goal is a precise prompt, not a solution.
@@ -75,6 +74,6 @@ Show the prompt in one fenced block, then one line: "Approve it, edit it, or cha
 
 ## 6. Save it and stop
 On approval call `mcp__helm__set_task` with `{ "prompt": "<the approved prompt, whole>", "goal": "<the goal in one line>" }`.
-Then stop and offer the two ways on, in two lines:
-- **Work on it here**: say so and this session does it, if superpowers is installed, brainstorming then writing-plans first (otherwise straight from the prompt, as the contract), finishing with the `<output>` report checked against `<acceptance>`.
-- **Hand it off**: `/helm:agent <name>` sends it to a saved agent in a new herdr tab named after it; `/helm:agent` defines a new agent for it first; `/helm:agent list` shows the saved ones.
+Then stop and say, in one line, that it is saved and that "go" starts it here: if superpowers is installed,
+brainstorming then writing-plans first (otherwise straight from the prompt, as the contract), finishing with
+the `<output>` report checked against `<acceptance>`.

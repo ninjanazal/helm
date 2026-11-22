@@ -1,8 +1,5 @@
 import type { EngineInterface } from 'claude-code'
-import { EFFORTS, engineIo, launchAgent, listAgents, mergeAgent, agentLine, saveAgent, setTask, stopAgent, teamList, teamStatus, STATUSES } from './agents'
-import type { AgentSpec } from './agents'
-import { atlasTool } from './atlas'
-import { detectHerdr } from './herdr'
+import { engineIo, setTask } from './task'
 import { deckOpenNow, deckReset, deckSet, deckTask } from './deck'
 
 /**
@@ -39,15 +36,9 @@ export async function registerHelmTools($: EngineInterface): Promise<void> {
     isDeferred: false,
   })
   await $.tool.register({
-    name: 'atlas',
-    description: 'Reports the atlas code index for this project (status: fresh, stale or not indexed, with counts), or rebuilds it (refresh).',
-    inputSchema: { type: 'object', required: ['action'], properties: { action: { type: 'string', enum: ['status', 'refresh'] } } },
-    isDeferred: false,
-  })
-  await $.tool.register({
     name: 'set_task',
     description:
-      'Saves the approved prompt as the current task (.claude/helm/task.md, read by agents started with /helm:agent) and sets the deck task to its goal. ' +
+      'Saves the approved prompt as the current task (.claude/helm/task.md) and sets the deck task to its goal. ' +
       'Call it only after the person approved the prompt.',
     inputSchema: {
       type: 'object',
@@ -57,68 +48,6 @@ export async function registerHelmTools($: EngineInterface): Promise<void> {
         goal: { type: 'string', description: 'The prompt\'s goal in one line' },
       },
     },
-    isDeferred: false,
-  })
-  await $.tool.register({
-    name: 'agent_list',
-    description: 'Lists saved agents (project .claude/agents and ~/.claude/agents): one line each with name, model, effort, tools, where it is saved and what it is for.',
-    inputSchema: { type: 'object', properties: {} },
-    isDeferred: false,
-  })
-  await $.tool.register({
-    name: 'agent_save',
-    description: 'Saves an agent definition to .claude/agents/<name>.md in this project. Call it only after the person approved the definition and its name.',
-    inputSchema: {
-      type: 'object',
-      required: ['name', 'description', 'instructions'],
-      properties: {
-        name: { type: 'string', description: 'lowercase letters, digits and -' },
-        description: { type: 'string', description: 'One line: what the agent is for' },
-        model: { type: 'string', description: 'e.g. opus, sonnet, haiku; leave out to inherit' },
-        effort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
-        tools: { type: 'array', items: { type: 'string' }, description: 'Tools it may use; leave out for all tools' },
-        instructions: { type: 'string', description: 'The agent\'s system prompt' },
-        overwrite: { type: 'boolean' },
-      },
-    },
-    isDeferred: false,
-  })
-  await $.tool.register({
-    name: 'agent_launch',
-    description: 'Starts a saved agent in a new herdr tab named after it, on a copy of the current task (.claude/helm/tasks/<name>.md), and adds it to the team. Needs herdr and an approved task.',
-    inputSchema: {
-      type: 'object',
-      required: ['name'],
-      properties: {
-        name: { type: 'string' },
-        model: { type: 'string', description: 'Model for this launch only, e.g. opus, sonnet, haiku or a full ID; leave out to use the agent\'s own' },
-        effort: { type: 'string', enum: EFFORTS, description: 'Effort for this launch only; leave out to use the agent\'s own' },
-      },
-    },
-    isDeferred: false,
-  })
-  await $.tool.register({
-    name: 'agent_merge',
-    description: "Merges an agent's branch (helm/<name>) into the main tree, locally. Without approve it only shows the diff stat and commits: show them to the person and ask. Call with approve: true only after they said yes; cleanup: true also removes the agent's worktree and branch. Never pushes.",
-    inputSchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, approve: { type: 'boolean' }, cleanup: { type: 'boolean' } } },
-    isDeferred: false,
-  })
-  await $.tool.register({
-    name: 'team',
-    description: "Lists the helm agents this session launched (.claude/helm/team.json): name, model·effort, status, age, branch. Checks each pane in herdr and marks closed ones gone.",
-    inputSchema: { type: 'object', properties: {} },
-    isDeferred: false,
-  })
-  await $.tool.register({
-    name: 'team_status',
-    description: 'Records a status an agent reported in a message ("status: working", "status: blocked <question>", "status: done <verdict>"). Call it whenever such a message arrives; the deck TEAM section shows it.',
-    inputSchema: { type: 'object', required: ['name', 'status'], properties: { name: { type: 'string' }, status: { type: 'string', enum: [...STATUSES] }, note: { type: 'string', description: 'The question or verdict, one line' } } },
-    isDeferred: false,
-  })
-  await $.tool.register({
-    name: 'agent_stop',
-    description: 'Stops a helm agent: closes its herdr pane and marks it stopped. Its branch and worktree stay. Only when the person asks.',
-    inputSchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' } } },
     isDeferred: false,
   })
 }
@@ -137,68 +66,14 @@ export async function handleHelmTool($: EngineInterface, tool: string, args: Rec
     }
     return toolText('Error: action is one of open, on, off, task, reset.', true)
   }
-  if (tool === 'mcp__helm__atlas') {
-    const action = str(args.action) ?? 'status'
-    if (action !== 'status' && action !== 'refresh') return toolText('Error: action is status or refresh.', true)
-    const r = await atlasTool($, action, await $.session.cwd().catch(() => undefined))
-    return toolText(r.text, r.isError)
-  }
-  if (tool === 'mcp__helm__set_task' || tool === 'mcp__helm__team' || tool === 'mcp__helm__team_status' || tool.startsWith('mcp__helm__agent_')) {
+  if (tool === 'mcp__helm__set_task') {
+    const prompt = str(args.prompt)?.trim()
+    const goal = str(args.goal)?.trim()
+    if (!prompt || !goal) return toolText('Error: set_task needs prompt and goal.', true)
     const root = (await $.session.cwd().catch(() => undefined)) ?? '.'
-    const home = (await $.env.get('HOME').catch(() => undefined)) || undefined
-    const io = engineIo($)
-    if (tool === 'mcp__helm__set_task') {
-      const prompt = str(args.prompt)?.trim()
-      const goal = str(args.goal)?.trim()
-      if (!prompt || !goal) return toolText('Error: set_task needs prompt and goal.', true)
-      await setTask(io, root, prompt, goal)
-      await deckTask($, goal)
-      return toolText(`Task saved: ${goal}. Work on it here, or hand it off with /helm:agent [name].`)
-    }
-    if (tool === 'mcp__helm__agent_list') {
-      const all = await listAgents(io, root, home)
-      return toolText(all.length ? all.map(agentLine).join('\n') : 'No agents saved yet. Run /helm:agent to define one for the current task.')
-    }
-    if (tool === 'mcp__helm__agent_save') {
-      const name = str(args.name)?.trim() ?? ''
-      const spec: AgentSpec = { name, description: str(args.description) ?? '', instructions: str(args.instructions) ?? '' }
-      if (str(args.model)) spec.model = str(args.model)
-      if (str(args.effort)) spec.effort = str(args.effort)
-      if (Array.isArray(args.tools) && args.tools.length) spec.tools = args.tools.filter((t): t is string => typeof t === 'string')
-      const r = await saveAgent(io, root, spec, args.overwrite === true)
-      return toolText(r.text, r.isError)
-    }
-    if (tool === 'mcp__helm__agent_launch') {
-      const name = str(args.name)?.trim()
-      if (!name) return toolText('Error: agent_launch needs a name.', true)
-      const model = str(args.model)?.trim() || undefined
-      const effort = str(args.effort)?.trim() || undefined
-      if (effort && !EFFORTS.includes(effort)) return toolText(`Error: effort is one of ${EFFORTS.join(', ')}.`, true)
-      const agentEnv = (await $.env.get('HELM_AGENT').catch(() => undefined)) || undefined
-      const sock = ((await $.env.get('CLAUDE_CODE_MESSAGING_SOCKET').catch(() => undefined)) ?? '').trim()
-      const r = await launchAgent(io, { root, home, herdr: await detectHerdr($), agentEnv, parent: sock ? `uds:${sock}` : undefined }, name, { model, effort })
-      return toolText(r.text, r.isError)
-    }
-    if (tool === 'mcp__helm__team') {
-      const r = await teamList(io, root, await detectHerdr($))
-      return toolText(r.text, r.isError)
-    }
-    if (tool === 'mcp__helm__team_status') {
-      const r = await teamStatus(io, root, str(args.name)?.trim() ?? '', str(args.status) ?? '', str(args.note))
-      return toolText(r.text, r.isError)
-    }
-    if (tool === 'mcp__helm__agent_stop') {
-      const r = await stopAgent(io, root, await detectHerdr($), str(args.name)?.trim() ?? '')
-      return toolText(r.text, r.isError)
-    }
-    if (tool === 'mcp__helm__agent_merge') {
-      const name = str(args.name)?.trim()
-      if (!name) return toolText('Error: agent_merge needs a name.', true)
-      const agentEnv = (await $.env.get('HELM_AGENT').catch(() => undefined)) || undefined
-      if (agentEnv?.trim()) return toolText(`Error: this session is the helm agent ${agentEnv}; only the main session merges.`, true)
-      const r = await mergeAgent(io, { root }, name, { approve: args.approve === true, cleanup: args.cleanup === true })
-      return toolText(r.text, r.isError)
-    }
+    await setTask(engineIo($), root, prompt, goal)
+    await deckTask($, goal)
+    return toolText(`Task saved: ${goal}. Say "go" to work on it here.`)
   }
   return undefined
 }

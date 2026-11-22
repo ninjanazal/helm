@@ -1,50 +1,51 @@
 # ⎈ helm
 
-> Steer your Claude Code sessions: see what they cost and when they drift, start every task from a complete prompt, hand it to agents in their own herdr tab, and find code without reading whole files.
+> Steer your Claude Code sessions: see what they cost and when they drift, and start every task from a complete prompt.
 
-helm is a Claude Code plugin plus **atlas**, a local code graph:
+helm is a Claude Code plugin:
 
-- **Deck pane:** the session's health beside the chat. It shows the task, a drift meter (time for a fresh session?), context and 5h limit bars with the pace to the limit, tokens, cost, cache hits, tokens saved by atlas, and a live feed of tool calls. It animates only while a turn runs.
+- **Deck pane:** the session's health beside the chat. It shows the task, a drift meter (time for a fresh session?), context and 5h limit bars with the pace to the limit, tokens, cost, cache hits, the files this session touched, and a live feed of tool calls. It animates only while a turn runs.
 - **`/helm:prompt`:** turns a rough request into a complete, checkable prompt (goal, grounded context, scope, acceptance checks, stop conditions) and saves it as the current task once approved.
-- **`/helm:agent`:** hands that task to a saved agent in its own herdr tab, or defines a new agent for it first. Each agent works in its own git worktree and branch; `/helm:agent merge <name>` merges it into the main tree after you approve. `/helm:agent team` splits a task across several agents at once; this session orchestrates them (status, questions, merges) and the deck shows the team.
-- **atlas** (`atlas/`, one Python file, runs in its own venv): indexes code in 12 languages (GDScript included) plus docs and config into `.atlas/graph.db`. It answers `find`, `symbol`, `neighbors` and `outline` over MCP with `path:lines`, not whole files. No services or models are needed.
-- **superpowers** (workflow skills) is installed with helm as a plugin dependency; helm's prompt, agent and commit skills route to it and work without it. **herdr** (agent-aware terminal) is optional.
+- **superpowers** (workflow skills) is installed with helm as a plugin dependency; helm's prompt and commit skills route to it and work without it.
 
 ## 📦 Install
 
 ```
-make setup     # asks: this project or every project, and which pieces (helm, superpowers, atlas, herdr)
+make setup     # asks: this project or every project, and which pieces (helm, superpowers)
 make remove    # asks the same, confirms, then uninstalls
 make status    # what is installed, and where
-make index     # build or refresh the atlas index
 ```
 
 Then run `/reload-plugins` and `/helm:deck` in Claude Code.
 
 From GitHub, without cloning: `/plugin install helm --marketplace ninjanazal/helm`.
 
+### Upgrading from atlas
+
+Earlier versions installed atlas (a local code index) and the `/helm:agent` herdr flow. Both are gone. To clean up an old install, run once per scope you used:
+
+```
+claude mcp remove --scope local atlas    # or --scope user
+rm -rf .atlas                            # this project's venv, launcher and index
+rm -f ~/.local/bin/atlas                 # user-scope launcher
+rm -rf ~/.local/share/helm/atlas         # user-scope venv
+rm -rf .claude/helm/tasks .claude/helm/team.json
+```
+
 ## 🧭 Deck
 
 - `/helm:deck` opens the pane; `/helm:deck on|off` turns it on or off for the project (off survives `/clear` and new sessions); `/helm:deck task <text>` re-anchors the task (and resets drift); `/helm:deck reset` clears it.
 - Drift = 0.4 × context fill + 0.4 × topic shift (new terms vs. the task's first prompt) + 0.2 × turns/60. At 0.70 it suggests a fresh session.
-- Every number comes from the engine, git or `atlas stats --json`; cost is the engine's own estimate.
+- Every number comes from the engine or git; cost is the engine's own estimate.
 
 ## ⌨️ Commands
 
 | Command | What it does |
 | --- | --- |
 | `/helm:prompt <request>` | Start a task: builds a complete prompt, saves it as the current task once you approve |
-| `/helm:agent [list \| <name> \| team \| stop <name>]` | Hand the current task to an agent in a new herdr tab named after it; with no name, define and save one first |
 | `/helm:deck [on \| off \| task <text> \| reset]` | The deck pane |
-| `/helm:atlas [refresh]` | Index state, or rebuild it |
 | `/helm:commit [--dry]` | Commit the staged changes: Conventional Commits subject, bulleted body, no attribution lines |
 | `/helm:help` | The full guide |
-
-## 🤖 Agents
-
-- Agents are Claude Code agent files: `.claude/agents/<name>.md` (project) or `~/.claude/agents/` (user).
-- `/helm:agent <name>` opens a new herdr tab labelled `<name>` (in the background) and runs `claude --agent <name>` there on its own copy of the task, `.claude/helm/tasks/<name>.md` (git-ignored), and records it in `.claude/helm/team.json`. The tab gets `HELM_AGENT=<name>`: no deck there, no nested agents.
-- Needs [herdr](https://herdr.dev); `/helm:agent list` works without it.
 
 ## 📊 Bench
 
@@ -60,12 +61,12 @@ sh bench/test.sh                        # free self-test: every check fails on t
 ```
 
 - **Tasks** (`bench/tasks/*`): a bug fix, a small feature, a refactor and a find-and-explain, all on `bench/fixture/` (a small POSIX sh library, `sh test.sh`). Each has `prompt.md`, a `check.sh` (exit 0 = pass) and a `solution.patch`.
-- **Large fixture:** the `large-*` tasks run on `bench/fixture-large/` (about 120 files; `sh bench/gen-large.sh` regenerates it). In their helm arm only, the copy is indexed with atlas (`index_ms` in the row) and the atlas MCP server is on; rows also carry `atlas_queries` and `atlas_avoided`. The report groups by model and fixture.
+- **Large fixture:** the `large-*` tasks run on `bench/fixture-large/` (about 120 files; `sh bench/gen-large.sh` regenerates it). The report groups by model and fixture.
 - **Isolation:** each run gets a fresh copy of the fixture in a temp dir. Both arms use the same flags and enable superpowers (helm's dependency); only the helm arm adds `--plugin-dir`. `--setting-sources project`, `--strict-mcp-config` and `--no-session-persistence` keep your user settings, plugins, MCP servers and sessions out of the runs.
 - **Results:** one JSONL row per run in `bench/results.jsonl` (date, sha, model, task, arm, run, pass, token counts, `cost_usd`, `duration_ms`, turns). Rows from a dirty tree get a `-dirty` sha. The file is yours to commit or not; `bench/results.sample.jsonl` holds invented numbers that only demo the report.
 - **Report:** per model, per task and TOTAL: pass (runs passed/run), and the median tokens (input + output + cache read + cache creation), cost (the engine's estimate) and wall time, for helm and baseline, the delta (helm - baseline), delta %, and the same delta % for the previous sha, to see whether helm got better or worse. TOTAL sums the task medians.
 - **Costs:** about $0.05-0.11 per run on sonnet, so roughly $3 for a full run; each run is capped at `BUDGET=1` USD. Needs `claude` and `jq`.
-- **Limits:** 4 small tasks and 3 runs is a smoke signal, not statistics; compare only runs with the same model; the model decides whether to call atlas, so on small repos it often doesn't; drift and `/helm:prompt` are not measured; runs use `acceptEdits` plus Bash in a throwaway dir, so they can run commands.
+- **Limits:** 4 small tasks and 3 runs is a smoke signal, not statistics; compare only runs with the same model; drift and `/helm:prompt` are not measured; runs use `acceptEdits` plus Bash in a throwaway dir, so they can run commands.
 
 ## 🛠️ Developing
 

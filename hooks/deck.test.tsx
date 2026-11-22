@@ -1,22 +1,22 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { bar, isDeckOn, taskGoal, deck, drift, driftGauge, layout, len, paceToLimit, parseWorktrees, terms, topicShift, verdict } from './deck-core'
+import { bar, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
 import type { DeckData } from './deck-core'
 
 const data = (x: Partial<DeckData> = {}): DeckData => ({
-  task: 'Add GDScript support to atlas', taskAt: 0, turns: 12, model: 'opus-5-5', effort: 'medium', branch: 'main', dirty: 3,
+  task: 'Add GDScript support to the parser', taskAt: 0, turns: 12, model: 'opus-5-5', effort: 'medium', branch: 'main', dirty: 3,
   ctx: { tokens: 118000, window: 200000, percent: 59 }, limits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: 3 * 3600 }],
   compactions: 1, cost: 4.8, tokens: { input: 1000, output: 2000, cacheRead: 9000, cacheWrite: 1000 },
-  atlas: { files: 24, queries: 14, returned: 1100, avoided: 57000, on: true }, sessionAvoided: 8000, touched: [{ path: 'hooks/deck.tsx', edited: true }, { path: 'hooks/herdr.ts', edited: false }, { path: 'atlas/src/query.rs', edited: false }],
+  touched: [{ path: 'hooks/deck.tsx', edited: true }, { path: 'hooks/tools.ts', edited: false }, { path: 'src/parser/query.rs', edited: false }],
   cur: { seq: 'ffrre', at: 0, tok0: 1000, doing: 'editing', target: 'hooks/deck-core.ts' }, history: [{ n: 11, seq: 'frr', tok: 31000, ms: 60000, result: 'warn', text: '2 whole-file reads' }, { n: 12, seq: 'ffret', tok: 18000, ms: 42000, result: 'ok', text: 'tests passed' }],
-  drift: drift(59, 0.5, 12), feed: [{ at: 0, kind: 'find', text: 'find exit', note: 'atlas', tone: 'good' }], running: true, ...x,
+  drift: drift(59, 0.5, 12), feed: [{ at: 0, kind: 'find', text: 'grep exit', tone: 'dim' }], running: true, ...x,
 })
 const text = (secs: ReturnType<typeof deck>) => secs.map(x => [x.title, ...x.body.map(l => l.map(s => s.t).join(''))].join('\n')).join('\n')
 
 test('drift weighs context, topic and turns, and topic shift counts new terms', () => {
   const d = drift(50, 0.5, 30)
   expect(Number(d.score.toFixed(2))).toBe(0.5)
-  const task = terms('add gdscript support to atlas')
-  expect(topicShift(task, terms('gdscript parser for atlas'))).toBe(1 / 3)
+  const task = terms('add gdscript support to the parser')
+  expect(topicShift(task, terms('gdscript grammar for the parser'))).toBe(1 / 3)
   expect(topicShift(task, new Set())).toBe(0)
 })
 
@@ -34,7 +34,7 @@ test('deck: every section, fits the width, animates only while running', () => {
   const now = 3.6e6
   const on = deck(data(), 46, 7, now)
   const t = text(on)
-  for (const x of ['TASK', 'DRIFT', 'SESSION', 'SAVED BY ATLAS', 'LIVE', 'Add GDScript', '59%', '42%', '$4.80', 'cache 82%', '⟲', 'editing hooks/deck-core.ts', '■ read 2', '■ edit 1', '■ find 2', 'last turns', '#12 ✔ tests passed', '#11 ⚠ 2 whole-file reads', '⎇ main', 'ATLAS', 'hooks/', '├ deck.tsx ✎', '└ herdr.ts', 'atlas/src/']) expect(t).toContain(x)
+  for (const x of ['TASK', 'DRIFT', 'SESSION', 'LIVE', 'Add GDScript', '59%', '42%', '$4.80', 'cache 82%', '⟲', 'editing hooks/deck-core.ts', '■ read 2', '■ edit 1', '■ find 2', 'last turns', '#12 ✔ tests passed', '#11 ⚠ 2 whole-file reads', '⎇ main', 'FILES', 'hooks/', '├ deck.tsx ✎', '└ tools.ts', 'src/parser/']) expect(t).toContain(x)
   for (const sec of on) for (const l of sec.body) expect(len(l)).toBeLessThanOrEqual(46)
   // the session meters' bars line up whatever their values say
   const ses = on.find(x => x.id === 'session')!.body.filter(l => l[0]?.t.trim() === 'context' || l[0]?.t.trim() === '5h')
@@ -45,7 +45,7 @@ test('deck: every section, fits the width, animates only while running', () => {
   expect(text(idle)).toContain('✔')
   expect(text(idle)).toContain('idle · turn 12 finished')
   expect(text(deck(data({ drift: drift(95, 1, 60) }), 46, 0, now))).toContain('start a fresh session')
-  expect(text(deck(data({ atlas: undefined }), 46, 0, now))).not.toContain('SAVED')
+  expect(text(deck(data({ touched: undefined }), 46, 0, now))).not.toContain('FILES')
   // unknown figures are hidden, not shown as zero
   const fresh = text(deck(data({ tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, task: undefined }), 46, 0, now))
   expect(fresh).not.toContain('tokens 0')
@@ -57,17 +57,6 @@ test('deck: every section, fits the width, animates only while running', () => {
   const big = text(deck(data({ tokens: { input: 1000, output: 2000, cacheRead: 1_400_000, cacheWrite: 1000 } }), 46, 0, now))
   for (const x of ['tokens 4.0k', 'in 2.0k', 'out 2.0k']) expect(big).toContain(x)
   expect(big).not.toContain('1.4M')
-})
-
-test('atlas state: stale shows the changed count, fresh the index size', () => {
-  const t = (a: Partial<NonNullable<DeckData['atlas']>>) => text(deck(data({ atlas: { files: 24, queries: 1, returned: 1, avoided: 1, on: true, ...a } }), 46, 0, 1))
-  expect(t({ state: 'stale', pending: 6, changed: 4, added: 2 })).toContain('NEEDS REFRESH')
-  expect(t({ state: 'stale', pending: 6, changed: 4, added: 2 })).toContain('4 changed · 2 new')
-  expect(t({ state: 'stale', pending: 6 })).toContain('make index')
-  expect(t({ state: 'fresh' })).toContain('up to date · 24 files')
-  expect(t({ state: 'missing' })).toContain('NO INDEX')
-  const cov = t({ state: 'fresh', lines: 9090, symbols: 384, db_bytes: 1904640, code_files: 16, code_with_symbols: 16, calls: 5441, resolved: 1573, langs: [['tsx', 6], ['rust', 6], ['doc', 6]] })
-  for (const x of ['9.1k lines', '1.8 MB', 'parsed', '100% 16/16', 'linked', '29% of calls', 'langs', '■ tsx 6']) expect(cov).toContain(x)
 })
 
 test('open layout: lower-case titles with a rule; the light sweeps only while running', () => {
@@ -120,22 +109,16 @@ test('/clear (session.end, reason clear, no session.start after it) reopens the 
   expect(opened.length).toBe(n)
 })
 
-test('deck: a fresh session with atlas stats but no touched files yet still draws', () => {
-  // Atlas answers within a second of launch, before any Read or Edit sets touched: this threw and left the pane blank.
+test('deck: a fresh session with no touched files, history or turn yet still draws', () => {
   const t = text(deck(data({ touched: undefined, history: undefined, cur: undefined, feed: [], turns: 0 }), 46, 0, 3.6e6))
-  expect(t).toContain('ATLAS')
+  expect(t).toContain('TASK')
+  expect(t).not.toContain('FILES')
 })
 
-test('deck on/off: on unless stored off, agent sessions included', () => {
+test('deck on/off: on unless stored off', () => {
   expect(isDeckOn(undefined)).toBe(true)
   expect(isDeckOn(true)).toBe(true)
   expect(isDeckOn(false)).toBe(false)
-})
-
-test('task goal: the heading of .claude/helm/task.md, else nothing', () => {
-  expect(taskGoal('# Ship the deck in agent tabs\n\n<goal>...</goal>\n')).toBe('Ship the deck in agent tabs')
-  expect(taskGoal('<goal>no heading</goal>')).toBe(undefined)
-  expect(taskGoal(undefined)).toBe(undefined)
 })
 
 function stubDeck(on: Parameters<Parameters<typeof test>[1]>[1], stored: Record<string, unknown>, env: Record<string, string> = {}) {
@@ -160,6 +143,7 @@ function stubDeck(on: Parameters<Parameters<typeof test>[1]>[1], stored: Record<
 const said = (r: unknown) => String((r as { result?: string; deny?: string }).result ?? (r as { deny?: string }).deny)
 const deckTool = ($: Parameters<Parameters<typeof test>[1]>[0], args: Record<string, unknown>) => $.tool.call({ tool: 'mcp__helm__deck', ...args } as never)
 
+
 test('deck tool: off closes and stays off across /clear and a new session; on reopens', async ($, on) => {
   const stored: Record<string, unknown> = {}
   const { opened, closed, clock } = stubDeck(on, stored)
@@ -183,39 +167,4 @@ test('deck tool: off closes and stays off across /clear and a new session; on re
   expect(said(await deckTool($, { action: 'task', text: 'ship it' }))).toBe('Deck task set: ship it')
   expect(said(await deckTool($, { action: 'reset' }))).toBe('Deck reset.')
   expect(said(await deckTool($, { action: 'open' }))).toBe('Deck opened.')
-})
-
-test('the deck opens in an agent session started by helm:agent, unless turned off for the project', async ($, on) => {
-  const stored: Record<string, unknown> = {}
-  const { opened, clock } = stubDeck(on, stored, { HELM_AGENT: 'reviewer' })
-  await $.session.start({ cwd: '/proj', surface: 'terminal', isInteractive: true })
-  await clock.advance(3000)
-  expect(opened).toContain('helm-deck')
-  opened.length = 0
-  stored['deckOn:/proj'] = false
-  await $.session.start({ cwd: '/proj', surface: 'terminal', isInteractive: true })
-  await clock.advance(3000)
-  expect(opened).toEqual([])
-})
-
-test('worktrees: helm agents are the helm/* branches in other folders; the main tree and other branches are skipped', () => {
-  const out = 'worktree /p\nHEAD a1\nbranch refs/heads/main\n\nworktree /p-wt/reviewer\nHEAD b2\nbranch refs/heads/helm/reviewer\n\nworktree /p-wt/spike\nHEAD c3\nbranch refs/heads/feature/x\n\nworktree /p-wt/gone\nHEAD d4\ndetached\n'
-  expect(parseWorktrees(out)).toEqual([{ name: 'reviewer', path: '/p-wt/reviewer', branch: 'helm/reviewer' }])
-  expect(parseWorktrees('')).toEqual([])
-})
-
-test('deck: a TEAM section joins team members with their worktrees; none, no section', () => {
-  const team = [{ name: 'reviewer', model: 'sonnet', effort: 'high', status: 'blocked', note: 'which API?', startedAt: 0 }, { name: 'writer', model: 'haiku', effort: 'low', status: 'working', startedAt: 3.0e6 }]
-  const secs = deck(data({ team, agents: [{ name: 'reviewer', branch: 'helm/reviewer', ahead: 3, dirty: 2 }, { name: 'scout', branch: 'helm/scout', ahead: 1, dirty: 0 }] }), 46, 0, 3.6e6)
-  const sec = secs.find(x => x.id === 'team')!
-  const lines = sec.body.map(l => l.map(x => x.t).join(''))
-  expect(lines[0]).toBe('reviewer  sonnet·high  blocked  1h 00m  +3 ±2…')
-  expect(lines[1]).toContain('writer  haiku·low  working  10m')
-  expect(lines[2]).toBe('scout  +1')
-  expect(sec.lit).toBe(true)
-  expect(sec.tone).toBe('warning')
-  expect(deck(data({ team: [{ ...team[1]! }] }), 46, 0, 3.6e6).find(x => x.id === 'team')!.lit).toBe(false)
-  expect(text(deck(data(), 46, 0, 3.6e6))).not.toContain('TEAM')
-  expect(text(deck(data({ agents: [], team: [] }), 46, 0, 3.6e6))).not.toContain('TEAM')
-  for (const s of secs) for (const l of s.body) expect(len(l)).toBeLessThanOrEqual(46)
 })

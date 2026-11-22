@@ -1,13 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import { DRIFT_AT, PANE_FRAME_MS, deck, drift, isDeckOn, layout, parseWorktrees, taskGoal, terms, tokenSplit, topicShift, verdict } from './deck-core'
+import { DRIFT_AT, PANE_FRAME_MS, deck, drift, isDeckOn, layout, terms, tokenSplit, topicShift, verdict } from './deck-core'
 import type { DeckData, FeedItem } from './deck-core'
 import type { DeckDone, DeckState } from '../types'
-import { atlasBin } from './atlas'
 
 /**
  * The deck pane: the session's health beside the chat. Every figure comes from the engine (session.measure,
- * $.session.usage, turn.step usage, session.compact, tool.call), git, or `atlas stats --json`; nothing is invented.
+ * $.session.usage, turn.step usage, session.compact, tool.call) or git; nothing is invented.
  * It animates only while a turn runs.
  */
 
@@ -17,10 +16,8 @@ const state = atom({ plugin: 'helm', key: 'deck' } as const, blank(), { shape: '
 const frame = atom({ plugin: 'helm', key: 'deckFrame' } as const, 0)
 
 let running = false
-let atlasBase: number | undefined
-let atlasMisses = 0
 let tickGen = 0
-/** Off (/helm:deck off, or an agent session): no auto-open, no reopen after /clear, no polling. */
+/** Off (/helm:deck off): no auto-open, no reopen after /clear, no polling. */
 let deckIsOn = true
 let deckKey: string | undefined
 
@@ -54,47 +51,6 @@ async function poll($: EngineInterface) {
     const lines = String(r.stdout).split('\n').filter(Boolean)
     const branch = lines[0]?.replace(/^## /, '').split('...')[0]
     await set($, s => ({ ...s, branch, dirty: lines.length - 1 }))
-  })
-  await quiet(async () => {
-    // helm team: who this session launched and what they last reported. Unchanged: no write.
-    const raw = await $.fs.read(`${cwd ?? '.'}/.claude/helm/team.json`).catch(() => '')
-    let team: DeckState['team'] = undefined
-    try {
-      const j = raw ? JSON.parse(raw) : []
-      if (Array.isArray(j) && j.length) team = j.map(m => ({ name: String(m.name), model: String(m.model ?? ''), effort: String(m.effort ?? ''), status: String(m.status ?? ''), ...(m.note ? { note: String(m.note) } : {}), startedAt: Number(m.startedAt) || 0 }))
-    } catch { /* a half-written file: keep the last team */ return }
-    await set($, s => (JSON.stringify(s.team ?? null) === JSON.stringify(team ?? null) ? s : { ...s, team }))
-  })
-  await quiet(async () => {
-    // helm agents: their worktrees, commits ahead of this tree and uncommitted files. Unchanged: no write.
-    const wt = await $.process.run(['git', 'worktree', 'list', '--porcelain'], opts)
-    const found = wt.exitCode === 0 ? parseWorktrees(String(wt.stdout)) : []
-    const agents = await Promise.all(found.map(async a => {
-      const [ahead, dirty] = await Promise.all([$.process.run(['git', 'rev-list', '--count', `HEAD..${a.branch}`], opts), $.process.run(['git', '-C', a.path, 'status', '--porcelain'], { timeoutMs: 3000 })])
-      return { name: a.name, branch: a.branch, ahead: Number.parseInt(String(ahead.stdout), 10) || 0, dirty: dirty.exitCode === 0 ? String(dirty.stdout).split('\n').filter(Boolean).length : 0 }
-    }))
-    await set($, s => (JSON.stringify(s.agents ?? []) === JSON.stringify(agents) ? s : { ...s, agents: agents.length ? agents : undefined }))
-  })
-  await quiet(async () => {
-    // Ask both, then write once: two writes made the section flip between states every poll.
-    // A failed or missing answer keeps the last good figures instead of blanking the section.
-    const bin = await atlasBin($, cwd)
-    if (!bin) { atlasMisses++; if (atlasMisses >= 3) await set($, s => ({ ...s, atlas: undefined })); return }
-    const [r, st] = await Promise.all([$.process.run([bin, 'stats', '--json'], opts), $.process.run([bin, 'status', '--json'], opts)])
-    if (r.exitCode !== 0) return
-    atlasMisses = 0
-    const j = JSON.parse(String(r.stdout)) as { files: number; symbols?: number; queries: number; returned: number; avoided: number; code_files?: number; code_with_symbols?: number; text_files?: number; calls?: number; resolved?: number; lines?: number; db_bytes?: number; langs?: [string, number][] }
-    const k = st.exitCode === 0 ? (JSON.parse(String(st.stdout)) as { state: string; changed: number; added: number; removed: number; indexed_at?: number }) : undefined
-    if (atlasBase === undefined) atlasBase = j.avoided
-    await set($, s => {
-      const status = k
-        ? { state: k.state, pending: k.changed + k.added + k.removed, changed: k.changed, added: k.added, removed: k.removed, indexedAt: k.indexed_at ? k.indexed_at * 1000 : undefined }
-        : { state: s.atlas?.state, pending: s.atlas?.pending, changed: s.atlas?.changed, added: s.atlas?.added, removed: s.atlas?.removed, indexedAt: s.atlas?.indexedAt }
-      const next = { ...j, on: true, ...status }
-      // Unchanged figures: no write, no redraw.
-      if (s.atlas && JSON.stringify(s.atlas) === JSON.stringify(next) && s.sessionAvoided === j.avoided - (atlasBase ?? j.avoided)) return s
-      return { ...s, atlas: next, sessionAvoided: j.avoided - (atlasBase ?? j.avoided) }
-    })
   })
 }
 
@@ -156,17 +112,8 @@ export const registerDeck: Register = on => {
 
 export async function deckStart($: EngineInterface) {
   let stored: unknown
-  let agent: string | undefined
   await quiet(async () => { stored = await $.store.get(await onKey($)) })
-  await quiet(async () => { agent = await $.env.get('HELM_AGENT') })
   deckIsOn = isDeckOn(stored)
-  // An agent tab's first prompt is the hand-off line, not the task: anchor its deck to the task's goal instead.
-  if (deckIsOn && agent?.trim()) {
-    await quiet(async () => {
-      const goal = taskGoal(await $.fs.read(`${await $.session.cwd()}/.claude/helm/task.md`))
-      if (goal) await deckTask($, goal)
-    })
-  }
   // /clear and /new fire session.start again: only the newest registration's timers do work.
   const gen = ++tickGen
   $.clock.every(PANE_FRAME_MS, () => void (gen === tickGen && deckIsOn && running && quiet(() => update($, frame, f => f + 1))))
@@ -266,17 +213,13 @@ export async function deckTool($: EngineInterface, e: { tool: string; agentId?: 
     const base = (p: unknown) => String(p ?? '').split('/').slice(-2).join('/')
     let f: Omit<FeedItem, 'at'> | undefined
     const tool = e.tool
-    if (tool.startsWith('mcp__atlas__')) {
-      const q = String(input.query ?? input.name ?? input.path ?? '')
-      f = { kind: 'find', text: `${tool.slice(12)} ${q}`.slice(0, 40), note: err ? 'error' : 'atlas', tone: err ? 'bad' : 'good' }
-      setTimeout0($)
-    } else if (tool === 'Read') {
+    if (tool === 'Read') {
       const ranged = input.offset !== undefined || input.limit !== undefined
       f = { kind: 'read', text: base(input.file_path), note: ranged ? 'range' : 'whole file', tone: ranged ? 'dim' : 'warn' }
     } else if (tool === 'Edit' || tool === 'Write' || tool === 'NotebookEdit') {
       f = { kind: 'edit', text: base(input.file_path ?? input.notebook_path), note: err ? 'failed' : undefined, tone: err ? 'bad' : undefined }
     } else if (tool === 'Grep' || tool === 'Glob') {
-      f = { kind: 'find', text: `${tool.toLowerCase()} ${String(input.pattern ?? '')}`.slice(0, 40), note: 'no index', tone: 'dim' }
+      f = { kind: 'find', text: `${tool.toLowerCase()} ${String(input.pattern ?? '')}`.slice(0, 40), tone: 'dim' }
     } else if (tool === 'Bash') {
       const cmd = String(input.command ?? '')
       if (TEST_RE.test(cmd)) {
@@ -320,11 +263,6 @@ export async function deckTool($: EngineInterface, e: { tool: string; agentId?: 
       } : s))
     }
   })
-}
-
-/** After an atlas call, refresh its stats soon so "saved" moves right away. */
-function setTimeout0($: EngineInterface) {
-  void quiet(() => poll($))
 }
 
 // ── the helm deck tool's actions ──

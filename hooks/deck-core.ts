@@ -24,10 +24,6 @@ export type DeckData = {
   cost?: number
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }
   day?: number
-  atlas?: { files: number; symbols?: number; queries: number; returned: number; avoided: number; on: boolean; state?: string; pending?: number; changed?: number; added?: number; removed?: number; indexedAt?: number; code_files?: number; code_with_symbols?: number; text_files?: number; calls?: number; resolved?: number; lines?: number; db_bytes?: number; langs?: [string, number][] }
-  sessionAvoided?: number
-  agents?: { name: string; branch: string; ahead: number; dirty: number }[]
-  team?: { name: string; model: string; effort: string; status: string; note?: string; startedAt: number }[]
   touched?: { path: string; edited: boolean }[]
   cur?: { seq: string; at: number; tok0: number; doing?: string; target?: string }
   history?: { n: number; seq: string; tok: number; ms: number; result: 'ok' | 'warn' | 'err' | 'none'; text: string }[]
@@ -194,26 +190,9 @@ function meter(label: string, p: number, w: number, c: string, value: Line, mark
 }
 
 /** The deck as sections. `w` is the text width inside a box. */
-/** helm agents in `git worktree list --porcelain` output: worktrees on a helm/* branch, in a folder other than the first (the main tree). */
-export function parseWorktrees(out: string): { name: string; path: string; branch: string }[] {
-  return out.split('\n\n').slice(1).flatMap(block => {
-    const path = /^worktree (.+)$/m.exec(block)?.[1]
-    const branch = /^branch refs\/heads\/(helm\/.+)$/m.exec(block)?.[1]
-    return path && branch ? [{ name: branch.slice(5), path, branch }] : []
-  })
-}
-
-/** Team members and helm worktrees by name: members first (launch order), then worktrees no member claims. */
-export function teamRows(d: Pick<DeckData, 'team' | 'agents'>) {
-  const wt = new Map((d.agents ?? []).map(a => [a.name, a]))
-  const rows = (d.team ?? []).map(m => ({ ...m, ahead: wt.get(m.name)?.ahead, dirty: wt.get(m.name)?.dirty }))
-  for (const a of d.agents ?? []) if (!rows.some(r => r.name === a.name)) rows.push({ name: a.name, model: '', effort: '', status: '', startedAt: undefined as unknown as number, ahead: a.ahead, dirty: a.dirty })
-  return rows
-}
-
 export function deck(d: DeckData, w: number, frame: number, now: number): Section[] {
   const out: Section[] = []
-  const order = ['task', 'drift', 'session', 'saved', 'live']
+  const order = ['task', 'drift', 'session', 'live']
   const litId = d.running ? order[Math.floor(frame / 6) % order.length] : undefined
   const sec = (id: string, title: string, tone: string, body: Line[]) => out.push({ id, title, tone, body: body.map(l => clip(l, w)), lit: id === litId })
 
@@ -229,21 +208,6 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
     line2,
     ...(line3.length ? [line3] : []),
   ])
-
-  // team: the agents this session launched (team.json) joined with their worktrees, one line each
-  const team = teamRows(d)
-  if (team.length) {
-    const tone: Record<string, string> = { working: 'claude', blocked: 'warning', done: 'success' }
-    out.push({ id: 'team', title: '⎇ TEAM', tone: team.some(r => r.status === 'blocked') ? 'warning' : 'suggestion', lit: team.some(r => r.status === 'blocked' || r.status === 'done'), body: team.map((r): Line => clip([
-      { t: r.name, b: true },
-      ...(r.model ? [{ t: `  ${r.model}·${r.effort}`, d: true }] : []),
-      ...(r.status ? [{ t: `  ${r.status}`, ...(tone[r.status] ? { c: tone[r.status] } : { d: true }), b: r.status === 'blocked' }] : []),
-      ...(r.startedAt !== undefined ? [{ t: `  ${fmtDur(now - r.startedAt)}`, d: true }] : []),
-      ...(r.ahead ? [{ t: `  +${r.ahead}`, c: 'success' }] : []),
-      ...(r.dirty ? [{ t: ` ±${r.dirty}`, c: 'warning' }] : []),
-      ...(r.note ? [{ t: `  ${r.note}`, d: true }] : []),
-    ], w)) })
-  }
 
   // drift
   const hi = d.drift.score >= DRIFT_AT
@@ -280,17 +244,8 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   if (figures.length) body.push(figures)
   if (body.length) sec('session', '◷ SESSION', 'suggestion', body)
 
-  // saved
-  if (d.atlas) {
-    const avoided = d.sessionAvoided ?? 0
-    sec('saved', '↓ SAVED BY ATLAS', 'success', [
-      [{ t: fmtTok(avoided), c: 'success', b: true }, { t: ' tokens this session', d: true }, ...(total > 0 && avoided ? [{ t: `  ·  ${Math.round((100 * avoided) / (total + avoided))}% less`, c: 'success' }] : [])],
-      [{ t: `${fmtTok(d.atlas.avoided)} all time  ·  ${d.atlas.queries} lookups  ·  ${d.atlas.files} files indexed`, d: true }],
-    ])
-  }
-
-  // atlas: index state, size and coverage, then the files this session touched as a small tree
-  if (d.atlas || d.touched?.length) {
+  // map: the files this session touched, as a small tree
+  if (d.touched?.length) {
     const byDir = new Map<string, { name: string; edited: boolean }[]>()
     for (const t of (d.touched ?? []).slice(-12)) {
       const k = t.path.lastIndexOf('/')
@@ -303,13 +258,11 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
       byDir.set(dir, list)
     }
     const map: Line[] = []
-    if (d.atlas) map.push(atlasState(d.atlas, now), ...atlasDetail(d.atlas, now), ...atlasCoverage(d.atlas, w))
-    if (d.atlas && d.touched?.length) map.push([])
     for (const [dir, files] of [...byDir].slice(-4)) {
       map.push([{ t: dir, c: 'suggestion', b: true }])
       files.slice(-4).forEach((f, i, a) => map.push([{ t: i === a.length - 1 ? '└ ' : '├ ', d: true }, { t: f.name, c: f.edited ? 'claude' : undefined, d: !f.edited }, ...(f.edited ? [{ t: ' ✎', c: 'claude' }] : [])]))
     }
-    sec('map', '⌘ ATLAS', d.atlas?.state === 'stale' || d.atlas?.state === 'missing' ? 'warning' : 'suggestion', map)
+    sec('map', '⌘ FILES', 'suggestion', map)
   }
 
   // live: what the current turn is doing, its tool mix, and how recent turns ended
@@ -374,58 +327,6 @@ export function layout(secs: Section[], w: number, frame: number, running: boole
   return out.map(l => clip(l, w))
 }
 
-/** fresh: index size; stale: how many files changed and that the next lookup reindexes; missing: how to build it. */
-export function atlasState(a: NonNullable<DeckData['atlas']>, now = 0): Line {
-  if (a.state === 'missing') return [{ t: ' ⚠ NO INDEX ', c: 'warning', inv: true, b: true }, { t: ' atlas has not indexed this repo', c: 'warning' }]
-  if (a.state === 'stale' && a.pending) return [{ t: ' ⚠ NEEDS REFRESH ', c: 'warning', inv: true, b: true }, { t: ` ${a.pending} file${a.pending === 1 ? '' : 's'} out of date`, c: 'warning', b: true }]
-  const age = a.indexedAt && now ? ` · indexed ${fmtDur(now - a.indexedAt)} ago` : ''
-  return [{ t: '● ', c: 'success' }, { t: 'up to date', c: 'success' }, { t: age || ` · ${a.files} files`, d: true }]
-}
-
-/** The lines under a stale/missing state: what changed and exactly what to run. */
-const LANG_TONE = ['suggestion', 'claude', 'success', 'warning', 'error', 'subtle']
-const fmtBytes = (b: number) => (b >= 1 << 20 ? `${(b / (1 << 20)).toFixed(1)} MB` : b >= 1024 ? `${Math.round(b / 1024)} kB` : `${b} B`)
-
-/** Size, coverage and the language split of the index. Lines appear only for the figures atlas reported. */
-export function atlasCoverage(a: NonNullable<DeckData['atlas']>, w: number): Line[] {
-  const out: Line[] = []
-  const size = [`${a.files} files`, a.lines ? `${fmtTok(a.lines)} lines` : '', a.symbols ? `${a.symbols} symbols` : '', a.db_bytes ? fmtBytes(a.db_bytes) : ''].filter(Boolean)
-  out.push([{ t: size.join(' · '), d: true }])
-  if (a.code_files) {
-    const p = (a.code_with_symbols ?? 0) / a.code_files
-    out.push(meter('parsed', p, w, p >= 0.9 ? 'success' : 'warning', [{ t: `${Math.round(p * 100)}%`, b: true }, { t: ` ${a.code_with_symbols}/${a.code_files}`, d: true }]))
-  }
-  if (a.calls) {
-    const p = (a.resolved ?? 0) / a.calls
-    out.push(meter('linked', p, w, 'suggestion', [{ t: `${Math.round(p * 100)}%`, b: true }, { t: ' of calls', d: true }]))
-  }
-  if (a.langs?.length) {
-    const total = a.langs.reduce((x, l) => x + l[1], 0)
-    const bw = Math.max(10, w - 9 - 14)
-    const mix: Line = [{ t: 'langs'.padEnd(8), d: true }]
-    let used = 0
-    a.langs.forEach(([, n], i) => {
-      const cw = i === a.langs!.length - 1 ? bw - used : Math.max(1, Math.round((n / total) * bw))
-      used += cw
-      mix.push({ t: '▆'.repeat(Math.max(0, cw)), c: LANG_TONE[i % LANG_TONE.length] })
-    })
-    out.push(mix)
-    out.push([{ t: ' '.repeat(8) }, ...a.langs.slice(0, 4).flatMap(([l, n], i) => [...(i ? [{ t: '  ' }] : []), { t: '■', c: LANG_TONE[i] }, { t: ` ${l} ${n}`, d: true }])])
-  }
-  return out
-}
-
-export function atlasDetail(a: NonNullable<DeckData['atlas']>, now = 0): Line[] {
-  if (a.state === 'missing') return [[{ t: '→ run ', d: true }, { t: 'make index', c: 'warning', b: true }, { t: '  (or any atlas lookup builds it)', d: true }]]
-  if (a.state !== 'stale' || !a.pending) return []
-  const parts = [a.changed ? `${a.changed} changed` : '', a.added ? `${a.added} new` : '', a.removed ? `${a.removed} deleted` : ''].filter(Boolean).join(' · ')
-  const age = a.indexedAt && now ? `last indexed ${fmtDur(now - a.indexedAt)} ago` : ''
-  return [
-    [{ t: [parts, age].filter(Boolean).join('  ·  '), d: true }],
-    [{ t: '→ run ', d: true }, { t: 'make index', c: 'warning', b: true }, { t: '  or it refreshes on the next atlas lookup', d: true }],
-  ]
-}
-
 /** How a turn ended, from what it did: tests decide; else whole-file reads or untested edits want a look. */
 export function verdict(c: { seq: string; whole: number; edits: number; tests?: boolean }): { result: 'ok' | 'warn' | 'err' | 'none'; text: string } {
   if (c.tests === false) return { result: 'err', text: 'tests failed' }
@@ -439,13 +340,7 @@ export function verdict(c: { seq: string; whole: number; edits: number; tests?: 
 export const FOOTER: Line = [{ t: '/helm:deck task <text>  ·  /helm:deck reset  ·  /helm:prompt', d: true }]
 export const PANE_FRAME_MS = 120
 
-/** Whether the deck opens: on unless stored off for the project. Agent sessions (/helm:agent tabs) follow the same setting. */
+/** Whether the deck opens: on unless stored off for the project. */
 export function isDeckOn(stored: unknown): boolean {
   return stored !== false
-}
-
-/** The goal line of .claude/helm/task.md (`# <goal>`), which anchors an agent session's deck. */
-export function taskGoal(text: string | undefined): string | undefined {
-  const m = /^# (.+)$/m.exec(text ?? '')
-  return m?.[1]?.trim() || undefined
 }
