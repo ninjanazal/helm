@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import { DRIFT_AT, PANE_FRAME_MS, deck, drift, isDeckOn, layout, terms, topicShift, verdict } from './deck-core'
+import { DRIFT_AT, PANE_FRAME_MS, deck, drift, isDeckOn, layout, parseWorktrees, terms, topicShift, verdict } from './deck-core'
 import type { DeckData, FeedItem } from './deck-core'
 import type { DeckDone, DeckState } from '../types'
 import { atlasBin } from './atlas'
@@ -54,6 +54,25 @@ async function poll($: EngineInterface) {
     const lines = String(r.stdout).split('\n').filter(Boolean)
     const branch = lines[0]?.replace(/^## /, '').split('...')[0]
     await set($, s => ({ ...s, branch, dirty: lines.length - 1 }))
+  })
+  await quiet(async () => {
+    const wt = await $.process.run(['git', 'worktree', 'list', '--porcelain'], opts)
+    if (wt.exitCode !== 0) return
+    const agents = await Promise.all(parseWorktrees(String(wt.stdout)).map(async a => {
+      const [ahead, dirty] = await Promise.all([$.process.run(['git', 'rev-list', '--count', `HEAD..${a.branch}`], opts), $.process.run(['git', '-C', a.path, 'status', '--porcelain'], opts)])
+      return { name: a.name, branch: a.branch, ahead: Number(String(ahead.stdout).trim()) || 0, dirty: dirty.exitCode === 0 ? String(dirty.stdout).split('\n').filter(Boolean).length : 0 }
+    }))
+    await set($, s => (JSON.stringify(s.agents ?? []) === JSON.stringify(agents) ? s : { ...s, agents: agents.length ? agents : undefined }))
+  })
+  await quiet(async () => {
+    // helm agents: their worktrees, commits ahead of this tree and uncommitted files. Unchanged: no write.
+    const wt = await $.process.run(['git', 'worktree', 'list', '--porcelain'], opts)
+    const found = wt.exitCode === 0 ? parseWorktrees(String(wt.stdout)) : []
+    const agents = await Promise.all(found.map(async a => {
+      const [ahead, dirty] = await Promise.all([$.process.run(['git', 'rev-list', '--count', `HEAD..${a.branch}`], opts), $.process.run(['git', '-C', a.path, 'status', '--porcelain'], { timeoutMs: 3000 })])
+      return { name: a.name, branch: a.branch, ahead: Number.parseInt(String(ahead.stdout), 10) || 0, dirty: dirty.exitCode === 0 ? String(dirty.stdout).split('\n').filter(Boolean).length : 0 }
+    }))
+    await set($, s => (JSON.stringify(s.agents ?? []) === JSON.stringify(agents) ? s : { ...s, agents: agents.length ? agents : undefined }))
   })
   await quiet(async () => {
     // Ask both, then write once: two writes made the section flip between states every poll.
