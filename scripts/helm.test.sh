@@ -48,5 +48,16 @@ reset; sh scripts/helm.sh bogus > "$T/out" 2>&1; e=$?
 reset; sh scripts/helm.sh help > "$T/out" 2>&1
 [ "$(wc -l < "$T/out")" -le 15 ] && ! has "$T/out" "$(printf '\033')" && ok 'help: short, no colour codes' || bad 'help: short, no colour codes'
 
+# make level: the targets, and the old names as quiet aliases.
+mk() { reset; make -s --no-print-directory "$@" < /dev/null > "$T/out" 2> "$T/err"; }
+mk help
+[ "$(wc -l < "$T/out")" -le 15 ] && ! grep -Eq 'local:|global|doctor|atlas-remove|superpowers-remove' "$T/out" \
+  && ! has "$T/out" "$(printf '\033')" && ok 'make help: short, no old names' || bad 'make help: short, no old names'
+mk atlas SCOPE=user
+has "$T/calls" 'mcp add --scope user atlas' && has "$T/err" '→ now: make setup' && ok 'make atlas SCOPE=user: still works, hints' || bad 'make atlas SCOPE=user: still works, hints'
+mk doctor
+has "$T/err" '→ now: make status' && has "$T/out" 'helm status' && ok 'make doctor: runs status, hints' || bad 'make doctor: runs status, hints'
+mk remove
+! has "$T/calls" uninstall && ok 'make remove without tty: nothing removed' || bad 'make remove without tty: nothing removed'
 printf '\n%d/%d passed\n' $((n-fails)) "$n"
 [ $fails -eq 0 ]

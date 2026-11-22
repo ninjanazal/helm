@@ -4,7 +4,7 @@ description: Show the helm guide - the deck pane and every /helm command. Use wh
 ---
 
 Show the person the guide below as it is, then offer to answer any question about it. Do not call tools.
-If no `superpowers:*` skills are in your skill list, add one line after it: "superpowers is not installed: helm works without it; add it with `make superpowers SCOPE=local|user`."
+If no `superpowers:*` skills are in your skill list, add one line after it: "superpowers is not installed: helm works without it; add it with `make setup` in the helm repo (pick superpowers)."
 
 # ⎈ helm
 
@@ -31,9 +31,9 @@ Drift = 0.4 × context fill + 0.4 × topic shift (new terms vs. the task) + 0.2 
 
 ## Agents
 - The current task lives in `.claude/helm/task.md` (git-ignored). Each approved `/helm:prompt` replaces it.
-- An agent tab runs `claude --agent <name>` with `HELM_AGENT=<name>` set: no deck there, and it does not start agents of its own. It reads the task file and starts with superpowers brainstorming when installed.
+- An agent tab runs `claude --agent <name>` with `HELM_AGENT=<name>` set. The deck opens there too (unless turned off for the project), anchored to the task goal; it does not start agents of its own. It reads the task file and, when superpowers is installed, follows brainstorming, writing-plans, then executing-plans or subagent-driven-development.
 - In a git repo each agent works in its own worktree (`../<repo>-wt/<name>`) on branch `helm/<name>` and asks the main session to merge when done.
 - Agents need herdr. Without it, `/helm:agent` still saves the definition and `list` works.
 
 ## atlas
-A local code graph (`.atlas/graph.db`). Its MCP tools `find`, `symbol`, `neighbors` and `outline` answer with `path:lines` instead of whole files. Install with `make atlas` in the helm repo.
+A local code graph (`.atlas/graph.db`). Its MCP tools `find`, `symbol`, `neighbors` and `outline` answer with `path:lines` instead of whole files. Install with `make setup` in the helm repo (pick atlas).

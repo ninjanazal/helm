@@ -30,7 +30,7 @@ test('report: no index, or unreadable status, says not indexed', () => {
 
 test('tool without an atlas binary says how to install it', async $ => {
   const r = await atlasTool($, 'status', '/proj', async () => undefined)
-  expect(r.text).toContain('make atlas')
+  expect(r.text).toContain('make setup')
   expect(r.isError).toBe(false)
 })
 

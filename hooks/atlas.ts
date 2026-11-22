@@ -46,7 +46,7 @@ export async function atlasTool(
   run: Runner = (argv, opts) => $.process.run(argv, opts) as Promise<Ran>,
 ): Promise<AtlasAnswer> {
   const bin = await lookup(cwd).catch(() => undefined)
-  if (!bin) return { text: 'atlas is not installed. Run `make atlas` (this project) or `make atlas SCOPE=user` (every project) in the helm repo.', isError: false }
+  if (!bin) return { text: 'atlas is not installed. Run `make setup` in the helm repo and pick atlas.', isError: false }
   const opts = cwd ? { cwd, timeoutMs: 5000 } : { timeoutMs: 5000 }
   let head = ''
   if (action === 'refresh') {

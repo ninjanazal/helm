@@ -13,12 +13,13 @@ helm is a Claude Code plugin plus **atlas**, a local code graph:
 ## 📦 Install
 
 ```
-make local     # this project only: plugin, superpowers, atlas + index
-make global    # every project
-make doctor    # what is installed, and where
+make setup     # asks: this project or every project, and which pieces (helm, superpowers, atlas, herdr)
+make remove    # asks the same, confirms, then uninstalls
+make status    # what is installed, and where
+make index     # build or refresh the atlas index
 ```
 
-Every piece can be installed or removed on its own, per scope: `make <piece>` / `make <piece>-remove` with `SCOPE=local|user` (pieces: `plugin`, `superpowers`, `atlas`, `index`). Then run `/reload-plugins` and `/helm:deck` in Claude Code.
+Then run `/reload-plugins` and `/helm:deck` in Claude Code.
 
 From GitHub, without cloning: `/plugin install helm --marketplace ninjanazal/helm`.
 
@@ -49,6 +50,6 @@ From GitHub, without cloning: `/plugin install helm --marketplace ninjanazal/hel
 
 ```
 claude --plugin-dir .       # run it from this folder
-make test                   # run the tests (claude plugin test .)
+make check                  # validate and run all the tests
 claude plugin validate .    # check it
 ```
