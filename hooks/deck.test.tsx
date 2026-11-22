@@ -1,5 +1,5 @@
-import { expect, test } from 'claude-code/testing'
-import { bar, deck, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
+import { expect, mock, test } from 'claude-code/testing'
+import { bar, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
 import type { DeckData } from './deck-core'
 
 const data = (x: Partial<DeckData> = {}): DeckData => ({
@@ -117,4 +117,65 @@ test('deck: a fresh session with atlas stats but no touched files yet still draw
   // Atlas answers within a second of launch, before any Read or Edit sets touched: this threw and left the pane blank.
   const t = text(deck(data({ touched: undefined, history: undefined, cur: undefined, feed: [], turns: 0 }), 46, 0, 3.6e6))
   expect(t).toContain('ATLAS')
+})
+
+test('deck on/off: stored off wins, agent sessions never open', () => {
+  expect(isDeckOn(undefined, undefined)).toBe(true)
+  expect(isDeckOn(false, undefined)).toBe(false)
+  expect(isDeckOn(true, 'reviewer')).toBe(false)
+  expect(isDeckOn(true, '')).toBe(true)
+})
+
+function stubDeck(on: Parameters<Parameters<typeof test>[1]>[1], stored: Record<string, unknown>, env: Record<string, string> = {}) {
+  const opened: string[] = []
+  const closed: string[] = []
+  const clock = mock.clock(on, { now: Date.UTC(2026, 10, 22, 10, 0) })
+  on('session.cwd', () => ({ value: '/proj' }) as never)
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.end', () => ({ sessionId: 's1' }))
+  on('session.usage', () => ({ value: { context: { window: 200000 }, rateLimits: [] } }) as never)
+  on('env.get', (_, e) => ({ value: Object.entries(env).find(([k]) => JSON.stringify(e).includes(k))?.[1] }) as never)
+  on('store.get', (_, e) => ({ value: stored[(e as { key: string }).key] }))
+  on('store.set', (_, e) => { stored[(e as { key: string }).key] = (e as { value: unknown }).value; return { value: undefined } })
+  on('tool.register', () => ({ value: {} }))
+  on('command.register', () => ({ value: { command: 'x' } }))
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }) as never)
+  on('fs.list', () => ({ value: [] }))
+  on('ui.open', (_, e) => { opened.push((e as { id: string }).id); return { value: { isPlaced: true } } })
+  on('ui.close', (_, e) => { closed.push((e as { id: string }).id); return { value: undefined } as never })
+  return { opened, closed, clock }
+}
+const said = (r: unknown) => String((r as { result?: string; deny?: string }).result ?? (r as { deny?: string }).deny)
+const deckTool = ($: Parameters<Parameters<typeof test>[1]>[0], args: Record<string, unknown>) => $.tool.call({ tool: 'mcp__helm__deck', ...args } as never)
+
+test('deck tool: off closes and stays off across /clear and a new session; on reopens', async ($, on) => {
+  const stored: Record<string, unknown> = {}
+  const { opened, closed, clock } = stubDeck(on, stored)
+  await $.session.start({ cwd: '/proj', surface: 'terminal', isInteractive: true })
+  await clock.advance(3000)
+  expect(opened).toContain('helm-deck')
+
+  expect(said(await deckTool($, { action: 'off' }))).toBe('Deck off.')
+  expect(closed).toContain('helm-deck')
+  expect(stored['deckOn:/proj']).toBe(false)
+  opened.length = 0
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } } as never)
+  await clock.advance(6000)
+  await $.session.start({ cwd: '/proj', surface: 'terminal', isInteractive: true })
+  await clock.advance(3000)
+  expect(opened).toEqual([])
+
+  expect(said(await deckTool($, { action: 'on' }))).toBe('Deck on.')
+  expect(stored['deckOn:/proj']).toBe(true)
+  expect(opened).toContain('helm-deck')
+  expect(said(await deckTool($, { action: 'task', text: 'ship it' }))).toBe('Deck task set: ship it')
+  expect(said(await deckTool($, { action: 'reset' }))).toBe('Deck reset.')
+  expect(said(await deckTool($, { action: 'open' }))).toBe('Deck opened.')
+})
+
+test('deck never opens in an agent session started by helm:agent', async ($, on) => {
+  const { opened, clock } = stubDeck(on, {}, { HELM_AGENT: 'reviewer' })
+  await $.session.start({ cwd: '/proj', surface: 'terminal', isInteractive: true })
+  await clock.advance(3000)
+  expect(opened).toEqual([])
 })

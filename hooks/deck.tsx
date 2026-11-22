@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import { DRIFT_AT, PANE_FRAME_MS, deck, drift, layout, terms, topicShift, verdict } from './deck-core'
+import { DRIFT_AT, PANE_FRAME_MS, deck, drift, isDeckOn, layout, terms, topicShift, verdict } from './deck-core'
 import type { DeckData, FeedItem } from './deck-core'
 import type { DeckDone, DeckState } from '../types'
 
@@ -19,6 +19,15 @@ let running = false
 let atlasBase: number | undefined
 let atlasMisses = 0
 let tickGen = 0
+/** Off (/helm:deck off, or an agent session): no auto-open, no reopen after /clear, no polling. */
+let deckIsOn = true
+let deckKey: string | undefined
+
+/** Per-project store key for the on/off choice, pinned to the launch directory. */
+async function onKey($: EngineInterface): Promise<string> {
+  if (!deckKey) deckKey = `deckOn:${(await $.session.cwd().catch(() => '')) || 'default'}`
+  return deckKey
+}
 
 function set($: EngineInterface, fn: (s: DeckState) => DeckState) {
   return update($, state, fn)
@@ -93,24 +102,6 @@ function view(s: DeckState): DeckData {
 
 export const registerDeck: Register = on => {
 
-  on('command.run', { command: 'deck' }, async ($, e) => {
-    const [sub, ...rest] = e.args.trim().split(/\s+/)
-    const now = await $.clock.now()
-    if (sub === 'task' && rest.length) {
-      const text = rest.join(' ')
-      await set($, s => ({ ...s, task: text.slice(0, 80), taskAt: now, taskTerms: [...terms(text)], recent: [], turns: 0 }))
-      return { text: `Deck task set: ${text}` }
-    }
-    if (sub === 'reset') {
-      await set($, s => ({ ...blank(), ctx: s.ctx, limits: s.limits, cost: s.cost, startedAt: s.startedAt }))
-      return { text: 'Deck reset.' }
-    }
-    await $.ui.open({ id: PANE, title: 'Deck' })
-    void poll($)
-    return { text: 'Deck opened.' }
-  })
-
-
   on('turn.start', async ($, e, next) => {
     if (!(e as { agentId?: string }).agentId) {
       running = true
@@ -155,20 +146,25 @@ export const registerDeck: Register = on => {
 // ── called from register.tsx's own hooks (the engine allows one unmatched hook per event per plugin) ──
 
 export async function deckStart($: EngineInterface) {
-  await quiet(() => $.command.register({ name: 'deck', description: 'Open the deck pane (session health, drift, atlas savings, live feed). /deck task <text> re-anchors the task.', argumentHint: '[task <text> | reset]' }))
+  let stored: unknown
+  let agent: string | undefined
+  await quiet(async () => { stored = await $.store.get(await onKey($)) })
+  await quiet(async () => { agent = await $.env.get('HELM_AGENT') })
+  deckIsOn = isDeckOn(stored, agent)
   // /clear and /new fire session.start again: only the newest registration's timers do work.
   const gen = ++tickGen
-  $.clock.every(PANE_FRAME_MS, () => void (gen === tickGen && running && quiet(() => update($, frame, f => f + 1))))
-  $.clock.every(5000, () => void (gen === tickGen && quiet(() => poll($))))
+  $.clock.every(PANE_FRAME_MS, () => void (gen === tickGen && deckIsOn && running && quiet(() => update($, frame, f => f + 1))))
+  $.clock.every(5000, () => void (gen === tickGen && deckIsOn && quiet(() => poll($))))
   // /clear's reset closes panes after session.start returns, so an open right after next(e) can be undone:
   // reopen a few times once the session has settled (opening an open pane is a no-op).
   let reopens = 0
   $.clock.every(600, () => void (gen === tickGen && reopens++ < 4 && deckOpen($)))
-  void poll($)
+  if (deckIsOn) void poll($)
 }
 
 /** Opens the deck once the session has settled: opened before next(e), /clear's reset closes it again. */
 export function deckOpen($: EngineInterface) {
+  if (!deckIsOn) return
   void quiet(async () => {
     const r = await $.ui.open({ id: PANE, title: 'Deck' })
     if (r?.isPlaced) reopenPending = false
@@ -183,6 +179,7 @@ let reopenPending = false
  * never runs for it. Reopen from here, now and a few times once the cleared session has settled.
  */
 export function deckCleared($: EngineInterface) {
+  if (!deckIsOn) return
   reopenPending = true
   const gen = tickGen
   let n = 0
@@ -312,6 +309,44 @@ export async function deckTool($: EngineInterface, e: { tool: string; agentId?: 
 /** After an atlas call, refresh its stats soon so "saved" moves right away. */
 function setTimeout0($: EngineInterface) {
   void quiet(() => poll($))
+}
+
+// ── the helm deck tool's actions ──
+
+/** Turns the deck on or off for this project (remembered) and opens or closes the pane. */
+export async function deckSet($: EngineInterface, isOn: boolean): Promise<string> {
+  deckIsOn = isOn
+  await quiet(async () => $.store.set(await onKey($), isOn))
+  if (isOn) {
+    await quiet(async () => { await $.ui.open({ id: PANE, title: 'Deck' }) })
+    void poll($)
+    return 'Deck on.'
+  }
+  reopenPending = false
+  await quiet(async () => { await $.ui.close({ id: PANE }) })
+  return 'Deck off.'
+}
+
+/** Opens the pane now; an off deck is turned on. */
+export async function deckOpenNow($: EngineInterface): Promise<string> {
+  if (!deckIsOn) await deckSet($, true)
+  else {
+    await quiet(async () => { await $.ui.open({ id: PANE, title: 'Deck' }) })
+    void poll($)
+  }
+  return 'Deck opened.'
+}
+
+/** Re-anchors the task: drift and turn counts start again from it. */
+export async function deckTask($: EngineInterface, text: string): Promise<string> {
+  const now = await $.clock.now()
+  await set($, s => ({ ...s, task: text.slice(0, 80), taskAt: now, taskTerms: [...terms(text)], recent: [], turns: 0 }))
+  return `Deck task set: ${text}`
+}
+
+export async function deckReset($: EngineInterface): Promise<string> {
+  await set($, s => ({ ...blank(), ctx: s.ctx, limits: s.limits, cost: s.cost, startedAt: s.startedAt }))
+  return 'Deck reset.'
 }
 
 export { DRIFT_AT }

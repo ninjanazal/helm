@@ -211,7 +211,7 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   sec('drift', hi ? '▲ DRIFT' : '◇ DRIFT', tone, [
     ...driftGauge(d.drift.score, w),
     [{ t: 'context ', d: true }, { t: d.drift.ctx.toFixed(2) }, { t: '   topic ', d: true }, { t: d.drift.topic.toFixed(2) }, { t: '   turns ', d: true }, { t: d.drift.turns.toFixed(2) }],
-    hi ? [{ t: '→ start a fresh session  ·  /deck task to re-anchor', c: 'error', b: true }] : [{ t: `fresh session suggested at ${DRIFT_AT.toFixed(2)}`, d: true }],
+    hi ? [{ t: '→ start a fresh session  ·  /helm:deck task to re-anchor', c: 'error', b: true }] : [{ t: `fresh session suggested at ${DRIFT_AT.toFixed(2)}`, d: true }],
   ])
 
   // session
@@ -395,5 +395,11 @@ export function verdict(c: { seq: string; whole: number; edits: number; tests?: 
   return { result: 'ok', text: 'done' }
 }
 
-export const FOOTER: Line = [{ t: '/deck task <text>  ·  /deck reset  ·  /helm:prompt', d: true }]
+export const FOOTER: Line = [{ t: '/helm:deck task <text>  ·  /helm:deck reset  ·  /helm:prompt', d: true }]
 export const PANE_FRAME_MS = 120
+
+/** Whether the deck opens: an agent session (HELM_AGENT set by /helm:agent) never; otherwise on unless stored off. */
+export function isDeckOn(stored: unknown, agentEnv: string | undefined): boolean {
+  if (typeof agentEnv === 'string' && agentEnv.trim() !== '') return false
+  return stored !== false
+}

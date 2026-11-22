@@ -1,5 +1,6 @@
 import { deckCleared, deckMeasure, deckOpen, deckPrompt, deckStart, deckStep, deckTool, deckTurnDone, registerDeck } from './deck'
 import type { Register } from 'claude-code'
+import { handleHelmTool, registerHelmTools, toolArgs } from './tools'
 
 /**
  * helm's event wiring. The engine allows one unmatched hook per event per plugin, so the deck's handlers are
@@ -23,6 +24,7 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await deckStart($)
+    await registerHelmTools($).catch(() => {})
     const r = await next(e)
     deckOpen($)
     return r
@@ -40,6 +42,10 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', async ($, e, next) => {
+    if (e.tool.startsWith('mcp__helm__')) {
+      const mine = await handleHelmTool($, e.tool, toolArgs(e))
+      if (mine !== undefined) return mine as never
+    }
     const res = await next(e)
     await deckTool($, e, res)
     return res
