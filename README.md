@@ -6,7 +6,7 @@ helm is a Claude Code plugin plus **atlas**, a local code graph:
 
 - **Deck pane:** the session's health beside the chat. It shows the task, a drift meter (time for a fresh session?), context and 5h limit bars with the pace to the limit, tokens, cost, cache hits, tokens saved by atlas, and a live feed of tool calls. It animates only while a turn runs.
 - **`/helm:prompt`:** turns a rough request into a complete, checkable prompt (goal, grounded context, scope, acceptance checks, stop conditions) and saves it as the current task once approved.
-- **`/helm:agent`:** hands that task to a saved agent in its own herdr tab, or defines a new agent for it first. Each agent works in its own git worktree and branch; `/helm:agent merge <name>` merges it into the main tree after you approve.
+- **`/helm:agent`:** hands that task to a saved agent in its own herdr tab, or defines a new agent for it first. Each agent works in its own git worktree and branch; `/helm:agent merge <name>` merges it into the main tree after you approve. `/helm:agent team` splits a task across several agents at once; this session orchestrates them (status, questions, merges) and the deck shows the team.
 - **atlas** (`atlas/`, Rust): indexes code in 12 languages (GDScript included) plus docs and config into `.atlas/graph.db`. It answers `find`, `symbol`, `neighbors` and `outline` over MCP with `path:lines`, not whole files. No services or models are needed.
 - **superpowers** (workflow skills) is installed with helm as a plugin dependency; helm's prompt, agent and commit skills route to it and work without it. **herdr** (agent-aware terminal) is optional.
 
@@ -34,7 +34,7 @@ From GitHub, without cloning: `/plugin install helm --marketplace ninjanazal/hel
 | Command | What it does |
 | --- | --- |
 | `/helm:prompt <request>` | Start a task: builds a complete prompt, saves it as the current task once you approve |
-| `/helm:agent [list \| <name>]` | Hand the current task to an agent in a new herdr tab named after it; with no name, define and save one first |
+| `/helm:agent [list \| <name> \| team \| stop <name>]` | Hand the current task to an agent in a new herdr tab named after it; with no name, define and save one first |
 | `/helm:deck [on \| off \| task <text> \| reset]` | The deck pane |
 | `/helm:atlas [refresh]` | Index state, or rebuild it |
 | `/helm:commit [--dry]` | Commit the staged changes: Conventional Commits subject, bulleted body, no attribution lines |
@@ -43,7 +43,7 @@ From GitHub, without cloning: `/plugin install helm --marketplace ninjanazal/hel
 ## 🤖 Agents
 
 - Agents are Claude Code agent files: `.claude/agents/<name>.md` (project) or `~/.claude/agents/` (user).
-- `/helm:agent <name>` opens a new herdr tab labelled `<name>` (in the background) and runs `claude --agent <name>` there on the task in `.claude/helm/task.md` (git-ignored). The tab gets `HELM_AGENT=<name>`: no deck there, no nested agents.
+- `/helm:agent <name>` opens a new herdr tab labelled `<name>` (in the background) and runs `claude --agent <name>` there on its own copy of the task, `.claude/helm/tasks/<name>.md` (git-ignored), and records it in `.claude/helm/team.json`. The tab gets `HELM_AGENT=<name>`: no deck there, no nested agents.
 - Needs [herdr](https://herdr.dev); `/helm:agent list` works without it.
 
 ## 📊 Bench

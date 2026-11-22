@@ -15,6 +15,8 @@ If no `superpowers:*` skills are in your skill list, add one line after it: "sup
 | `/helm:agent` | Define an agent for the current task with Claude, save it to `.claude/agents/<name>.md`, and start it in a new herdr tab named after it on the task. |
 | `/helm:agent <name>` | Start a saved agent in a new herdr tab named after it on the current task. |
 | `/helm:agent merge <name>` | Merge that agent's branch (`helm/<name>`) into the main tree after you approve; conflicts abort and come back to you. Never pushes. |
+| `/helm:agent team` | Split the current task into 2–5 sub-tasks, each with an agent and model · effort, flag overlapping files, and launch them after you approve. With a team running, show who is working, blocked, done or gone. |
+| `/helm:agent stop <name>` | Close that agent's tab; its branch and worktree stay. |
 | `/helm:agent list` | Saved agents: name, model, effort, tools, project or user, what it is for. |
 | `/helm:deck` | Open the deck pane. |
 | `/helm:deck on` / `off` | Turn the deck on or off for this project. Off stays off across `/clear` and new sessions. |
@@ -32,7 +34,7 @@ Drift = 0.4 × context fill + 0.4 × topic shift (new terms vs. the task) + 0.2 
 ## Agents
 - The current task lives in `.claude/helm/task.md` (git-ignored). Each approved `/helm:prompt` replaces it.
 - An agent tab runs `claude --agent <name>` with `HELM_AGENT=<name>` set. The deck opens there too (unless turned off for the project), anchored to the task goal; it does not start agents of its own. It reads the task file and, when superpowers is installed, follows brainstorming, writing-plans, then executing-plans or subagent-driven-development.
-- In a git repo each agent works in its own worktree (`../<repo>-wt/<name>`) on branch `helm/<name>` and asks the main session to merge when done.
+- In a git repo each agent works in its own worktree (`../<repo>-wt/<name>`) on branch `helm/<name>` and asks the main session to merge when done. It also reports `status: working | blocked | done`, shown in the deck's TEAM section.
 - Agents need herdr. Without it, `/helm:agent` still saves the definition and `list` works.
 
 ## atlas
