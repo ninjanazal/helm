@@ -204,10 +204,18 @@ test('worktrees: helm agents are the helm/* branches in other folders; the main 
   expect(parseWorktrees('')).toEqual([])
 })
 
-test('deck: an AGENTS section lists each agent branch with its commits ahead and uncommitted files; none, no section', () => {
-  const t = text(deck(data({ agents: [{ name: 'reviewer', branch: 'helm/reviewer', ahead: 3, dirty: 2 }, { name: 'scout', branch: 'helm/scout', ahead: 0, dirty: 0 }] }), 46, 0, 3.6e6))
-  for (const x of ['AGENTS', 'reviewer', '⎇ helm/reviewer', '+3', '±2', 'scout']) expect(t).toContain(x)
-  expect(text(deck(data(), 46, 0, 3.6e6))).not.toContain('AGENTS')
-  expect(text(deck(data({ agents: [] }), 46, 0, 3.6e6))).not.toContain('AGENTS')
-  for (const sec of deck(data({ agents: [{ name: 'a-very-long-agent-name-indeed', branch: 'helm/a-very-long-agent-name-indeed', ahead: 12, dirty: 30 }] }), 46, 0, 3.6e6)) for (const l of sec.body) expect(len(l)).toBeLessThanOrEqual(46)
+test('deck: a TEAM section joins team members with their worktrees; none, no section', () => {
+  const team = [{ name: 'reviewer', model: 'sonnet', effort: 'high', status: 'blocked', note: 'which API?', startedAt: 0 }, { name: 'writer', model: 'haiku', effort: 'low', status: 'working', startedAt: 3.0e6 }]
+  const secs = deck(data({ team, agents: [{ name: 'reviewer', branch: 'helm/reviewer', ahead: 3, dirty: 2 }, { name: 'scout', branch: 'helm/scout', ahead: 1, dirty: 0 }] }), 46, 0, 3.6e6)
+  const sec = secs.find(x => x.id === 'team')!
+  const lines = sec.body.map(l => l.map(x => x.t).join(''))
+  expect(lines[0]).toBe('reviewer  sonnet·high  blocked  1h 00m  +3 ±2…')
+  expect(lines[1]).toContain('writer  haiku·low  working  10m')
+  expect(lines[2]).toBe('scout  +1')
+  expect(sec.lit).toBe(true)
+  expect(sec.tone).toBe('warning')
+  expect(deck(data({ team: [{ ...team[1]! }] }), 46, 0, 3.6e6).find(x => x.id === 'team')!.lit).toBe(false)
+  expect(text(deck(data(), 46, 0, 3.6e6))).not.toContain('TEAM')
+  expect(text(deck(data({ agents: [], team: [] }), 46, 0, 3.6e6))).not.toContain('TEAM')
+  for (const s of secs) for (const l of s.body) expect(len(l)).toBeLessThanOrEqual(46)
 })

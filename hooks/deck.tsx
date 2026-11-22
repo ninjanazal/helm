@@ -56,13 +56,14 @@ async function poll($: EngineInterface) {
     await set($, s => ({ ...s, branch, dirty: lines.length - 1 }))
   })
   await quiet(async () => {
-    const wt = await $.process.run(['git', 'worktree', 'list', '--porcelain'], opts)
-    if (wt.exitCode !== 0) return
-    const agents = await Promise.all(parseWorktrees(String(wt.stdout)).map(async a => {
-      const [ahead, dirty] = await Promise.all([$.process.run(['git', 'rev-list', '--count', `HEAD..${a.branch}`], opts), $.process.run(['git', '-C', a.path, 'status', '--porcelain'], opts)])
-      return { name: a.name, branch: a.branch, ahead: Number(String(ahead.stdout).trim()) || 0, dirty: dirty.exitCode === 0 ? String(dirty.stdout).split('\n').filter(Boolean).length : 0 }
-    }))
-    await set($, s => (JSON.stringify(s.agents ?? []) === JSON.stringify(agents) ? s : { ...s, agents: agents.length ? agents : undefined }))
+    // helm team: who this session launched and what they last reported. Unchanged: no write.
+    const raw = await $.fs.read(`${cwd ?? '.'}/.claude/helm/team.json`).catch(() => '')
+    let team: DeckState['team'] = undefined
+    try {
+      const j = raw ? JSON.parse(raw) : []
+      if (Array.isArray(j) && j.length) team = j.map(m => ({ name: String(m.name), model: String(m.model ?? ''), effort: String(m.effort ?? ''), status: String(m.status ?? ''), ...(m.note ? { note: String(m.note) } : {}), startedAt: Number(m.startedAt) || 0 }))
+    } catch { /* a half-written file: keep the last team */ return }
+    await set($, s => (JSON.stringify(s.team ?? null) === JSON.stringify(team ?? null) ? s : { ...s, team }))
   })
   await quiet(async () => {
     // helm agents: their worktrees, commits ahead of this tree and uncommitted files. Unchanged: no write.

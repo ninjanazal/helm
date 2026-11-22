@@ -23,6 +23,8 @@ export type DeckState = {
   sessionAvoided?: number
   /** helm agents working in their own worktrees (branch helm/<name>): commits ahead of this tree, uncommitted files. */
   agents?: { name: string; branch: string; ahead: number; dirty: number }[]
+  /** The agents this session launched (.claude/helm/team.json): what they last reported. */
+  team?: { name: string; model: string; effort: string; status: string; note?: string; startedAt: number }[]
   /** The turn in progress (or the last one): its calls in order as letters r e f t x, and what it is doing. */
   cur?: DeckTurn
   /** The `cur` turn finished: the next tool call (or turn.start) opens a new one. */

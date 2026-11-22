@@ -27,7 +27,7 @@ export type DeckData = {
   atlas?: { files: number; symbols?: number; queries: number; returned: number; avoided: number; on: boolean; state?: string; pending?: number; changed?: number; added?: number; removed?: number; indexedAt?: number; code_files?: number; code_with_symbols?: number; text_files?: number; calls?: number; resolved?: number; lines?: number; db_bytes?: number; langs?: [string, number][] }
   sessionAvoided?: number
   agents?: { name: string; branch: string; ahead: number; dirty: number }[]
-  agents?: { name: string; branch: string; ahead: number; dirty: number }[]
+  team?: { name: string; model: string; effort: string; status: string; note?: string; startedAt: number }[]
   touched?: { path: string; edited: boolean }[]
   cur?: { seq: string; at: number; tok0: number; doing?: string; target?: string }
   history?: { n: number; seq: string; tok: number; ms: number; result: 'ok' | 'warn' | 'err' | 'none'; text: string }[]
@@ -37,17 +37,6 @@ export type DeckData = {
 }
 
 export type Drift = { score: number; ctx: number; topic: number; turns: number }
-
-/** helm agents in `git worktree list --porcelain`: the helm/<name> branches checked out in other folders. */
-export function parseWorktrees(porcelain: string): { name: string; path: string; branch: string }[] {
-  const out: { name: string; path: string; branch: string }[] = []
-  for (const block of porcelain.split(/\n\s*\n/)) {
-    const path = /^worktree (.+)$/m.exec(block)?.[1]
-    const branch = /^branch refs\/heads\/(helm\/.+)$/m.exec(block)?.[1]
-    if (path && branch) out.push({ name: branch.slice(5), path, branch })
-  }
-  return out
-}
 
 export const DRIFT_AT = 0.7
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
@@ -214,6 +203,14 @@ export function parseWorktrees(out: string): { name: string; path: string; branc
   })
 }
 
+/** Team members and helm worktrees by name: members first (launch order), then worktrees no member claims. */
+export function teamRows(d: Pick<DeckData, 'team' | 'agents'>) {
+  const wt = new Map((d.agents ?? []).map(a => [a.name, a]))
+  const rows = (d.team ?? []).map(m => ({ ...m, ahead: wt.get(m.name)?.ahead, dirty: wt.get(m.name)?.dirty }))
+  for (const a of d.agents ?? []) if (!rows.some(r => r.name === a.name)) rows.push({ name: a.name, model: '', effort: '', status: '', startedAt: undefined as unknown as number, ahead: a.ahead, dirty: a.dirty })
+  return rows
+}
+
 export function deck(d: DeckData, w: number, frame: number, now: number): Section[] {
   const out: Section[] = []
   const order = ['task', 'drift', 'session', 'saved', 'live']
@@ -233,20 +230,19 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
     ...(line3.length ? [line3] : []),
   ])
 
-  // agents: one line each, their branch, commits ahead and uncommitted files
-  if (d.agents?.length) {
-    sec('agents', '⎇ AGENTS', 'permission', d.agents.map((a): Line => [
-      { t: a.name, b: true }, { t: `  ⎇ ${a.branch}`, d: true },
-      ...(a.ahead ? [{ t: `  +${a.ahead}`, c: 'success' }] : []),
-      ...(a.dirty ? [{ t: ` ±${a.dirty}`, c: 'warning' }] : []),
-    ]))
-  }
-
-  // agents: one line each, branch and how far ahead of the main tree
-  if (d.agents?.length) {
-    sec('agents', '⎇ AGENTS', 'suggestion', d.agents.map((a): Line => [
-      { t: a.name, b: true }, { t: `  ⎇ ${a.branch}`, d: true }, ...(a.ahead ? [{ t: `  +${a.ahead}`, c: 'success' }] : []), ...(a.dirty ? [{ t: ` ±${a.dirty}`, c: 'warning' }] : []),
-    ]))
+  // team: the agents this session launched (team.json) joined with their worktrees, one line each
+  const team = teamRows(d)
+  if (team.length) {
+    const tone: Record<string, string> = { working: 'claude', blocked: 'warning', done: 'success' }
+    out.push({ id: 'team', title: '⎇ TEAM', tone: team.some(r => r.status === 'blocked') ? 'warning' : 'suggestion', lit: team.some(r => r.status === 'blocked' || r.status === 'done'), body: team.map((r): Line => clip([
+      { t: r.name, b: true },
+      ...(r.model ? [{ t: `  ${r.model}·${r.effort}`, d: true }] : []),
+      ...(r.status ? [{ t: `  ${r.status}`, ...(tone[r.status] ? { c: tone[r.status] } : { d: true }), b: r.status === 'blocked' }] : []),
+      ...(r.startedAt !== undefined ? [{ t: `  ${fmtDur(now - r.startedAt)}`, d: true }] : []),
+      ...(r.ahead ? [{ t: `  +${r.ahead}`, c: 'success' }] : []),
+      ...(r.dirty ? [{ t: ` ±${r.dirty}`, c: 'warning' }] : []),
+      ...(r.note ? [{ t: `  ${r.note}`, d: true }] : []),
+    ], w)) })
   }
 
   // drift
