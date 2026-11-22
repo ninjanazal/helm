@@ -1,0 +1,13 @@
+diff --git a/src/strutil.sh b/src/strutil.sh
+index 2ff6b67..e667cd3 100644
+--- a/src/strutil.sh
++++ b/src/strutil.sh
+@@ -10,7 +10,7 @@ truncate_str() {
+   if [ "${#1}" -le "$2" ]; then
+     printf '%s' "$1"
+   else
+-    printf '%s...' "$(printf '%s' "$1" | cut -c1-"$2")"
++    printf '%s...' "$(printf '%s' "$1" | cut -c1-"$(($2 - 3))")"
+   fi
+ }
+ 

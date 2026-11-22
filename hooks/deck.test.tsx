@@ -1,0 +1,170 @@
+import { expect, mock, test } from 'claude-code/testing'
+import { bar, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
+import type { DeckData } from './deck-core'
+
+const data = (x: Partial<DeckData> = {}): DeckData => ({
+  task: 'Add GDScript support to the parser', taskAt: 0, turns: 12, model: 'opus-5-5', effort: 'medium', branch: 'main', dirty: 3,
+  ctx: { tokens: 118000, window: 200000, percent: 59 }, limits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: 3 * 3600 }],
+  compactions: 1, cost: 4.8, tokens: { input: 1000, output: 2000, cacheRead: 9000, cacheWrite: 1000 },
+  touched: [{ path: 'hooks/deck.tsx', edited: true }, { path: 'hooks/tools.ts', edited: false }, { path: 'src/parser/query.rs', edited: false }],
+  cur: { seq: 'ffrre', at: 0, tok0: 1000, doing: 'editing', target: 'hooks/deck-core.ts' }, history: [{ n: 11, seq: 'frr', tok: 31000, ms: 60000, result: 'warn', text: '2 whole-file reads' }, { n: 12, seq: 'ffret', tok: 18000, ms: 42000, result: 'ok', text: 'tests passed' }],
+  drift: drift(59, 0.5, 12), feed: [{ at: 0, kind: 'find', text: 'grep exit', tone: 'dim' }], running: true, ...x,
+})
+const text = (secs: ReturnType<typeof deck>) => secs.map(x => [x.title, ...x.body.map(l => l.map(s => s.t).join(''))].join('\n')).join('\n')
+
+test('drift weighs context, topic and turns, and topic shift counts new terms', () => {
+  const d = drift(50, 0.5, 30)
+  expect(Number(d.score.toFixed(2))).toBe(0.5)
+  const task = terms('add gdscript support to the parser')
+  expect(topicShift(task, terms('gdscript grammar for the parser'))).toBe(1 / 3)
+  expect(topicShift(task, new Set())).toBe(0)
+})
+
+test('bars: filled, track and threshold cells', () => {
+  expect(bar(0.5, 4, 'x').map(s => s.c ?? 'dim').join(',')).toBe('x,subtle')
+  expect(bar(0.2, 10, 'x', 0.7).map(s => `${s.c ?? 'dim'}:${s.t.length}`).join(',')).toBe('x:2,subtle:5,warning:1,subtle:2')
+})
+
+test('pace: only when the limit would hit before the reset', () => {
+  expect(paceToLimit(50, 0, undefined, 3.6e6)).toBe(3.6e6)
+  expect(paceToLimit(10, 0, 2 * 3.6e6, 3.6e6)).toBe(undefined)
+})
+
+test('deck: every section, fits the width, animates only while running', () => {
+  const now = 3.6e6
+  const on = deck(data(), 46, 7, now)
+  const t = text(on)
+  for (const x of ['TASK', 'DRIFT', 'SESSION', 'LIVE', 'Add GDScript', '59%', '42%', '$4.80', 'cache 82%', '⟲', 'editing hooks/deck-core.ts', '■ read 2', '■ edit 1', '■ find 2', 'last turns', '#12 ✔ tests passed', '#11 ⚠ 2 whole-file reads', '⎇ main', 'FILES', 'hooks/', '├ deck.tsx ✎', '└ tools.ts', 'src/parser/']) expect(t).toContain(x)
+  for (const sec of on) for (const l of sec.body) expect(len(l)).toBeLessThanOrEqual(46)
+  // the session meters' bars line up whatever their values say
+  const ses = on.find(x => x.id === 'session')!.body.filter(l => l[0]?.t.trim() === 'context' || l[0]?.t.trim() === '5h')
+  expect(new Set(ses.map(l => l.map(x => x.t).join('').indexOf(' ', 9 + 20))).size).toBe(1)
+  expect(on.filter(x => x.lit).length).toBe(1)
+  const idle = deck(data({ running: false }), 46, 7, now)
+  expect(idle.some(x => x.lit)).toBe(false)
+  expect(text(idle)).toContain('✔')
+  expect(text(idle)).toContain('idle · turn 12 finished')
+  expect(text(deck(data({ drift: drift(95, 1, 60) }), 46, 0, now))).toContain('start a fresh session')
+  expect(text(deck(data({ touched: undefined }), 46, 0, now))).not.toContain('FILES')
+  // unknown figures are hidden, not shown as zero
+  const fresh = text(deck(data({ tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, task: undefined }), 46, 0, now))
+  expect(fresh).not.toContain('tokens 0')
+  expect(fresh).toContain('your next prompt becomes the task')
+  // tokens: in = input + cache writes, out = output; cache reads only feed the cache %; no $/h rate
+  for (const x of ['tokens 4.0k', 'in 2.0k', 'out 2.0k', 'cost $4.80']) expect(t).toContain(x)
+  expect(t).not.toContain('/h')
+  expect(t).not.toContain('rate ')
+  const big = text(deck(data({ tokens: { input: 1000, output: 2000, cacheRead: 1_400_000, cacheWrite: 1000 } }), 46, 0, now))
+  for (const x of ['tokens 4.0k', 'in 2.0k', 'out 2.0k']) expect(big).toContain(x)
+  expect(big).not.toContain('1.4M')
+})
+
+test('open layout: lower-case titles with a rule; the light sweeps only while running', () => {
+  const secs = deck(data(), 44, 7, 3.6e6)
+  const on = layout(secs, 46, 7, true).map(l => l.map(s => s.t).join(''))
+  expect(on[0]!.startsWith('◆ task ─')).toBe(true)
+  expect(on.some(l => l.includes('━'))).toBe(true)
+  for (const l of on) expect([...l].length).toBeLessThanOrEqual(46)
+  const off = layout(secs, 46, 7, false).map(l => l.map(s => s.t).join(''))
+  expect(off.some(l => l.includes('━'))).toBe(false)
+  // one section carries the pulsing dot while running, none when idle
+  expect(on.filter(l => /^[●○] /.test(l)).length).toBe(1)
+  expect(off.filter(l => /^[●○] /.test(l)).length).toBe(0)
+})
+
+test('verdict: tests decide, then whole-file reads, untested edits, no tools', () => {
+  const c = (x: object) => ({ seq: 'r', at: 0, tok0: 0, whole: 0, edits: 0, ...x })
+  expect(verdict(c({ tests: false })).result).toBe('err')
+  expect(verdict(c({ tests: true, whole: 2 })).text).toBe('tests passed')
+  expect(verdict(c({ whole: 2 })).text).toBe('2 whole-file reads')
+  expect(verdict(c({ edits: 1 })).text).toBe('edited, not tested')
+  expect(verdict(c({ seq: '' })).result).toBe('none')
+  expect(verdict(c({})).text).toBe('done')
+})
+
+test('drift gauge: fill coloured by zone, a word for the zone, a scale under it', () => {
+  const [bar, scale] = driftGauge(0.6, 46)
+  const tones = bar!.filter(x => x.t.includes('▆')).map(x => x.c)
+  expect(tones).toEqual(['success', 'warning', 'subtle'])
+  expect(bar!.map(x => x.t).join('')).toContain('0.60 drifting')
+  expect(scale!.map(x => x.t).join('')).toContain('on task')
+  expect(scale!.map(x => x.t).join('')).toContain('│fresh')
+  expect(driftGauge(0.8, 46)[0]!.map(x => x.t).join('')).toContain('start fresh')
+})
+
+// The deck's open is fire-and-forget: let it land before counting.
+const settle = () => new Promise<void>(r => (globalThis as unknown as { setTimeout: (f: () => void, ms: number) => unknown }).setTimeout(r, 50))
+
+test('/clear (session.end, reason clear, no session.start after it) reopens the deck', async ($, on) => {
+  const opened: string[] = []
+  on('ui.open', (_, e) => { opened.push((e as { id: string }).id); return { value: { isPlaced: true } } })
+  on('clock.every', () => ({ value: undefined }))
+  on('session.end', () => ({ sessionId: 's1' }))
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } } as never)
+  expect(opened).toContain('helm-deck')
+  await settle()
+  const n = opened.length
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's2', resume: { id: 's2' } } as never)
+  await settle()
+  expect(opened.length).toBe(n)
+})
+
+test('deck: a fresh session with no touched files, history or turn yet still draws', () => {
+  const t = text(deck(data({ touched: undefined, history: undefined, cur: undefined, feed: [], turns: 0 }), 46, 0, 3.6e6))
+  expect(t).toContain('TASK')
+  expect(t).not.toContain('FILES')
+})
+
+test('deck on/off: on unless stored off', () => {
+  expect(isDeckOn(undefined)).toBe(true)
+  expect(isDeckOn(true)).toBe(true)
+  expect(isDeckOn(false)).toBe(false)
+})
+
+function stubDeck(on: Parameters<Parameters<typeof test>[1]>[1], stored: Record<string, unknown>, env: Record<string, string> = {}) {
+  const opened: string[] = []
+  const closed: string[] = []
+  const clock = mock.clock(on, { now: Date.UTC(2026, 10, 22, 10, 0) })
+  on('session.cwd', () => ({ value: '/proj' }) as never)
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.end', () => ({ sessionId: 's1' }))
+  on('session.usage', () => ({ value: { context: { window: 200000 }, rateLimits: [] } }) as never)
+  on('env.get', (_, e) => ({ value: Object.entries(env).find(([k]) => JSON.stringify(e).includes(k))?.[1] }) as never)
+  on('store.get', (_, e) => ({ value: stored[(e as { key: string }).key] }))
+  on('store.set', (_, e) => { stored[(e as { key: string }).key] = (e as { value: unknown }).value; return { value: undefined } })
+  on('tool.register', () => ({ value: {} }))
+  on('command.register', () => ({ value: { command: 'x' } }))
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }) as never)
+  on('fs.list', () => ({ value: [] }))
+  on('ui.open', (_, e) => { opened.push((e as { id: string }).id); return { value: { isPlaced: true } } })
+  on('ui.close', (_, e) => { closed.push((e as { id: string }).id); return { value: undefined } as never })
+  return { opened, closed, clock }
+}
+const said = (r: unknown) => String((r as { result?: string; deny?: string }).result ?? (r as { deny?: string }).deny)
+const deckTool = ($: Parameters<Parameters<typeof test>[1]>[0], args: Record<string, unknown>) => $.tool.call({ tool: 'mcp__helm__deck', ...args } as never)
+
+
+test('deck tool: off closes and stays off across /clear and a new session; on reopens', async ($, on) => {
+  const stored: Record<string, unknown> = {}
+  const { opened, closed, clock } = stubDeck(on, stored)
+  await $.session.start({ cwd: '/proj', surface: 'terminal', isInteractive: true })
+  await clock.advance(3000)
+  expect(opened).toContain('helm-deck')
+
+  expect(said(await deckTool($, { action: 'off' }))).toBe('Deck off.')
+  expect(closed).toContain('helm-deck')
+  expect(stored['deckOn:/proj']).toBe(false)
+  opened.length = 0
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } } as never)
+  await clock.advance(6000)
+  await $.session.start({ cwd: '/proj', surface: 'terminal', isInteractive: true })
+  await clock.advance(3000)
+  expect(opened).toEqual([])
+
+  expect(said(await deckTool($, { action: 'on' }))).toBe('Deck on.')
+  expect(stored['deckOn:/proj']).toBe(true)
+  expect(opened).toContain('helm-deck')
+  expect(said(await deckTool($, { action: 'task', text: 'ship it' }))).toBe('Deck task set: ship it')
+  expect(said(await deckTool($, { action: 'reset' }))).toBe('Deck reset.')
+  expect(said(await deckTool($, { action: 'open' }))).toBe('Deck opened.')
+})

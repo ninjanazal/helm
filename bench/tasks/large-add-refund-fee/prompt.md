@@ -1,0 +1,1 @@
+Add `payments_refund_fee <cents>` next to the existing payment fee code: a refund costs the same fee as a normal payment of that amount, but never more than 1000 cents, and nothing (0) for amounts under 100 cents. Add a test for it in the payments tests and keep `sh test.sh` passing.

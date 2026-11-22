@@ -1,0 +1,1 @@
+A customer used coupon SAVE10 on a 4000 cent order and got no discount. Without changing any code, explain why: write ANSWER.md (at most 8 lines) naming the function that decides it, the function and file that define the rule, and the rule's value.

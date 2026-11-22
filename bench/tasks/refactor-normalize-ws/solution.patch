@@ -1,0 +1,36 @@
+diff --git a/src/people.sh b/src/people.sh
+index 249f56e..5009b70 100644
+--- a/src/people.sh
++++ b/src/people.sh
+@@ -2,15 +2,15 @@
+ 
+ # fmt_name <text>: trimmed, single-spaced, Title Case.
+ fmt_name() {
+-  title_case "$(printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]][[:space:]]*/ /g')"
++  title_case "$(normalize_ws "$1")"
+ }
+ 
+ # fmt_city <text>: trimmed, single-spaced, Title Case.
+ fmt_city() {
+-  title_case "$(printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]][[:space:]]*/ /g')"
++  title_case "$(normalize_ws "$1")"
+ }
+ 
+ # fmt_street <text>: trimmed and single-spaced; case is kept.
+ fmt_street() {
+-  printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]][[:space:]]*/ /g'
++  normalize_ws "$1"
+ }
+diff --git a/src/strutil.sh b/src/strutil.sh
+index 2ff6b67..a67b82c 100644
+--- a/src/strutil.sh
++++ b/src/strutil.sh
+@@ -24,3 +24,8 @@ count_words() {
+ title_case() {
+   printf '%s' "$1" | awk -v ORS= '{ for (i = 1; i <= NF; i++) $i = toupper(substr($i, 1, 1)) tolower(substr($i, 2)); print }'
+ }
++
++# normalize_ws <text>: trimmed, runs of whitespace collapsed to one space.
++normalize_ws() {
++  printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]][[:space:]]*/ /g'
++}

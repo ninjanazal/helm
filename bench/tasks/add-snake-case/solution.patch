@@ -1,0 +1,23 @@
+diff --git a/src/strutil.sh b/src/strutil.sh
+index 2ff6b67..1a557ff 100644
+--- a/src/strutil.sh
++++ b/src/strutil.sh
+@@ -24,3 +24,8 @@ count_words() {
+ title_case() {
+   printf '%s' "$1" | awk -v ORS= '{ for (i = 1; i <= NF; i++) $i = toupper(substr($i, 1, 1)) tolower(substr($i, 2)); print }'
+ }
++
++# snake_case <text>: lowercase; each run of non-alphanumerics becomes one "_".
++snake_case() {
++  printf '%s' "$1" | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9][^a-z0-9]*/_/g; s/^_//; s/_$//'
++}
+diff --git a/tests/strutil_test.sh b/tests/strutil_test.sh
+index 98117f9..27bbfaa 100644
+--- a/tests/strutil_test.sh
++++ b/tests/strutil_test.sh
+@@ -3,4 +3,5 @@ assert_eq slugify 'hello-world' "$(slugify 'Hello, World!')"
+ assert_eq truncate-short 'hi' "$(truncate_str 'hi' 10)"
+ assert_eq count 3 "$(count_words ' one  two three ')"
+ assert_eq title 'Ada Lovelace' "$(title_case 'aDA lOVELACE')"
++assert_eq snake 'hello_world' "$(snake_case 'Hello, World')"
+ finish
