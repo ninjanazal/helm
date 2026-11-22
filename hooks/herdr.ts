@@ -29,11 +29,12 @@ export function resetHerdr(preset?: Herdr | null) {
 
 /**
  * argv to open a new tab labelled `name` in this pane's workspace (pane ids are `<workspace>:<pane>`), in `cwd`,
- * marked as a helm agent session, without stealing focus.
+ * marked as a helm agent session (and with its launching session's address as HELM_PARENT, when known), without stealing focus.
  */
-export function tabArgv(h: Herdr, cwd: string, name: string): string[] {
+export function tabArgv(h: Herdr, cwd: string, name: string, parent?: string): string[] {
   const ws = h.pane.split(':')[0]!
-  return [h.bin, 'tab', 'create', '--workspace', ws, '--cwd', cwd, '--label', name, '--env', `HELM_AGENT=${name}`, '--no-focus']
+  const env = ['--env', `HELM_AGENT=${name}`, ...(parent ? ['--env', `HELM_PARENT=${parent}`] : [])]
+  return [h.bin, 'tab', 'create', '--workspace', ws, '--cwd', cwd, '--label', name, ...env, '--no-focus']
 }
 
 /** POSIX single-quoting: safe for any text. */

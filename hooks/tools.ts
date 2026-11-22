@@ -1,5 +1,5 @@
 import type { EngineInterface } from 'claude-code'
-import { engineIo, launchAgent, listAgents, agentLine, saveAgent, setTask } from './agents'
+import { engineIo, launchAgent, listAgents, mergeAgent, agentLine, saveAgent, setTask } from './agents'
 import type { AgentSpec } from './agents'
 import { atlasTool } from './atlas'
 import { detectHerdr } from './herdr'
@@ -89,6 +89,12 @@ export async function registerHelmTools($: EngineInterface): Promise<void> {
     inputSchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' } } },
     isDeferred: false,
   })
+  await $.tool.register({
+    name: 'agent_merge',
+    description: "Merges an agent's branch (helm/<name>) into the main tree, locally. Without approve it only shows the diff stat and commits: show them to the person and ask. Call with approve: true only after they said yes; cleanup: true also removes the agent's worktree and branch. Never pushes.",
+    inputSchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, approve: { type: 'boolean' }, cleanup: { type: 'boolean' } } },
+    isDeferred: false,
+  })
 }
 
 /** Runs a helm tool; undefined when `tool` is not one of helm's. */
@@ -140,7 +146,16 @@ export async function handleHelmTool($: EngineInterface, tool: string, args: Rec
       const name = str(args.name)?.trim()
       if (!name) return toolText('Error: agent_launch needs a name.', true)
       const agentEnv = (await $.env.get('HELM_AGENT').catch(() => undefined)) || undefined
-      const r = await launchAgent(io, { root, home, herdr: await detectHerdr($), agentEnv }, name)
+      const sock = ((await $.env.get('CLAUDE_CODE_MESSAGING_SOCKET').catch(() => undefined)) ?? '').trim()
+      const r = await launchAgent(io, { root, home, herdr: await detectHerdr($), agentEnv, parent: sock ? `uds:${sock}` : undefined }, name)
+      return toolText(r.text, r.isError)
+    }
+    if (tool === 'mcp__helm__agent_merge') {
+      const name = str(args.name)?.trim()
+      if (!name) return toolText('Error: agent_merge needs a name.', true)
+      const agentEnv = (await $.env.get('HELM_AGENT').catch(() => undefined)) || undefined
+      if (agentEnv?.trim()) return toolText(`Error: this session is the helm agent ${agentEnv}; only the main session merges.`, true)
+      const r = await mergeAgent(io, { root }, name, { approve: args.approve === true, cleanup: args.cleanup === true })
       return toolText(r.text, r.isError)
     }
   }

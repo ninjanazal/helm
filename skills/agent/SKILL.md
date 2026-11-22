@@ -12,7 +12,10 @@ The current task is the prompt approved with `/helm:prompt`, saved in `.claude/h
 Call `mcp__helm__agent_list` and show its reply as is.
 
 ## `/helm:agent <name>`
-Call `mcp__helm__agent_launch` with `{ "name": "<name>" }` and show its reply as is. Nothing else.
+Call `mcp__helm__agent_launch` with `{ "name": "<name>" }` and show its reply as is. Nothing else. In a git repo the agent gets its own worktree (`../<repo>-wt/<name>`) on branch `helm/<name>`.
+
+## `/helm:agent merge <name>`
+Call `mcp__helm__agent_merge` with `{ "name": "<name>" }`, show the diff stat and commits, and ask in one line: "Merge helm/<name> into the main tree?" On yes call it again with `approve: true` (add `cleanup: true` only if they also want the worktree and branch removed). Show the reply as is. Merge one agent at a time; never push.
 
 ## `/helm:agent` (no argument): define an agent for the task, then hand it off
 1. Read `.claude/helm/task.md`. If it is missing or empty, say there is no approved task yet and offer `/helm:prompt <request>`. Stop.

@@ -93,13 +93,37 @@ export async function getTask(io: Io, root: string): Promise<string | undefined>
   return t?.trim() ? t : undefined
 }
 
-export function handoffPrompt(): string {
-  return `Read ${TASK_FILE}: it is your task, already approved. Start with the superpowers brainstorming skill if it is available, then plan with writing-plans and build with executing-plans or subagent-driven-development.`
+export function handoffPrompt(taskPath = TASK_FILE, branch?: string, name?: string): string {
+  const start = `Read ${taskPath}: it is your task, already approved. Start with the superpowers brainstorming skill if it is available, then plan with writing-plans and build with executing-plans or subagent-driven-development.`
+  if (!branch || !name) return start
+  return `${start} You work on branch ${branch} in your own worktree: commit there, never push, never merge into the main tree. When done, message the session in $HELM_PARENT (if set) asking it to merge ${branch}, with a 3-line summary; otherwise end your report with "run /helm:agent merge ${name}". If told the merge conflicted, merge the main branch into ${branch}, resolve, commit and ask again.`
 }
 
-export type LaunchCtx = { root: string; home?: string; herdr: Herdr | null; agentEnv?: string }
+/** Where agent `name` works: a sibling folder of the main tree, on its own branch. */
+export function worktreeOf(root: string, name: string): { path: string; branch: string } {
+  const i = root.replace(/\/+$/, '').lastIndexOf('/')
+  const dir = root.slice(0, i), base = root.slice(i + 1)
+  return { path: `${dir}/${base}-wt/${name}`, branch: `helm/${name}` }
+}
 
-/** Opens a herdr tab named after the agent and starts `claude --agent <name>` on the task file. */
+export type LaunchCtx = { root: string; home?: string; herdr: Herdr | null; agentEnv?: string; parent?: string }
+
+const git = (io: Io, root: string, ...args: string[]) =>
+  io.run(['git', '-C', root, ...args]).catch((err: unknown): Ran => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+const said = (r: Ran) => String(r.stderr || r.stdout).trim().slice(0, 200)
+
+/** Makes (or finds) the agent's worktree. `undefined` path: not a git repo, work in the main tree. */
+async function ensureWorktree(io: Io, root: string, name: string): Promise<{ path?: string; reused?: boolean; error?: string }> {
+  if ((await git(io, root, 'rev-parse', '--is-inside-work-tree')).exitCode !== 0) return {}
+  const { path, branch } = worktreeOf(root, name)
+  const list = await git(io, root, 'worktree', 'list', '--porcelain')
+  if (list.exitCode === 0 && String(list.stdout).split('\n').includes(`worktree ${path}`)) return { path, reused: true }
+  let add = await git(io, root, 'worktree', 'add', path, '-b', branch)
+  if (add.exitCode !== 0) add = await git(io, root, 'worktree', 'add', path, branch)
+  return add.exitCode === 0 ? { path } : { error: `Error: could not create the worktree ${path} on ${branch}: ${said(add)}` }
+}
+
+/** Opens a herdr tab named after the agent, in its own git worktree, and starts `claude --agent <name>` on the task file. */
 export async function launchAgent(io: Io, ctx: LaunchCtx, name: string): Promise<Answer> {
   if (!NAME_RE.test(name)) return { text: `Error: "${name}" is not a valid agent name (lowercase letters, digits and -).`, isError: true }
   if (ctx.agentEnv?.trim()) return { text: `Error: this session is the helm agent ${ctx.agentEnv}; agents do not start other agents.`, isError: true }
@@ -110,12 +134,43 @@ export async function launchAgent(io: Io, ctx: LaunchCtx, name: string): Promise
     const names = all.filter(a => a.ok).map(a => a.name)
     return { text: `Error: no agent "${name}". ${names.length ? `Agents: ${names.join(', ')}.` : 'No agents saved yet: run /helm:agent to define one.'}`, isError: true }
   }
-  const split = await io.run(tabArgv(ctx.herdr, ctx.root, name)).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+  const wt = await ensureWorktree(io, ctx.root, name)
+  if (wt.error) return { text: wt.error, isError: true }
+  const branch = wt.path ? worktreeOf(ctx.root, name).branch : undefined
+  const split = await io.run(tabArgv(ctx.herdr, wt.path ?? ctx.root, name, ctx.parent)).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
   const pane = split.exitCode === 0 ? paneIdFrom(String(split.stdout)) : undefined
   if (!pane) return { text: `Error: herdr did not open a tab: ${String(split.stdout || split.stderr).trim().slice(0, 200)}`, isError: true }
-  const run = await io.run(runArgv(ctx.herdr, pane, name, handoffPrompt())).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+  const run = await io.run(runArgv(ctx.herdr, pane, name, handoffPrompt(`${ctx.root}/${TASK_FILE}`, branch, name))).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
   if (run.exitCode !== 0) return { text: `Error: herdr opened tab "${name}" (pane ${pane}) but could not start the agent: ${String(run.stderr || run.stdout).trim().slice(0, 200)}`, isError: true }
-  return { text: `Started ${name} in a new tab "${name}" (pane ${pane}).`, isError: false }
+  const where = wt.path ? `, worktree ${wt.path} on branch ${branch}${wt.reused ? ' (reused)' : ''}` : ''
+  return { text: `Started ${name} in a new tab "${name}" (pane ${pane})${where}.`, isError: false }
+}
+
+/**
+ * Merges agent `name`'s branch into the main tree's checked-out branch, locally. Without `approve` it only previews.
+ * A conflict aborts the merge and keeps the branch. Never pushes.
+ */
+export async function mergeAgent(io: Io, ctx: { root: string }, name: string, opts: { approve?: boolean; cleanup?: boolean }): Promise<Answer> {
+  if (!NAME_RE.test(name)) return { text: `Error: "${name}" is not a valid agent name (lowercase letters, digits and -).`, isError: true }
+  const { path, branch } = worktreeOf(ctx.root, name)
+  if ((await git(io, ctx.root, 'rev-parse', '--verify', branch)).exitCode !== 0) return { text: `Error: no branch ${branch}: agent "${name}" has no worktree work to merge.`, isError: true }
+  if (!opts.approve) {
+    const stat = await git(io, ctx.root, 'diff', '--stat', `HEAD...${branch}`)
+    const log = await git(io, ctx.root, 'log', '--oneline', `HEAD..${branch}`)
+    return { text: `${branch} vs the main tree:\n${String(stat.stdout).trim() || '(no file changes)'}\n\nCommits:\n${String(log.stdout).trim() || '(none)'}\n\nAsk the person to approve; then call agent_merge again with approve: true.`, isError: false }
+  }
+  const merge = await git(io, ctx.root, 'merge', '--no-ff', branch, '-m', `merge ${branch}`)
+  if (merge.exitCode !== 0) {
+    const files = String((await git(io, ctx.root, 'diff', '--name-only', '--diff-filter=U')).stdout).trim().split('\n').filter(Boolean)
+    await git(io, ctx.root, 'merge', '--abort')
+    return { text: `Error: merging ${branch} conflicts in: ${files.join(', ') || said(merge)}. The merge was aborted and ${branch} is untouched. Ask ${name} to merge the main branch into ${branch}, resolve and ask again.`, isError: true }
+  }
+  if (!opts.cleanup) return { text: `Merged ${branch} into the main tree. Offer to clean up: agent_merge with approve and cleanup removes the worktree and the branch.`, isError: false }
+  const rm = await git(io, ctx.root, 'worktree', 'remove', path)
+  const del = await git(io, ctx.root, 'branch', '-d', branch)
+  return rm.exitCode === 0 && del.exitCode === 0
+    ? { text: `Merged ${branch} and removed ${path} and the branch.`, isError: false }
+    : { text: `Merged ${branch}, but cleanup failed: ${said(rm.exitCode === 0 ? del : rm)}`, isError: true }
 }
 
 /** The engine-backed Io. */
