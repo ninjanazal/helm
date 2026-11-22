@@ -4,3 +4,5 @@
 .dev/
 .claude/teams/*/files/
 atlas/target/
+.superpowers/
+.claude/helm/
