@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { agentFile, agentLine, getTask, handoffPrompt, launchAgent, listAgents, mergeAgent, parseAgent, saveAgent, setTask, worktreeOf } from './agents'
+import { agentFile, agentLine, getTask, handoffPrompt, launchAgent, listAgents, mergeAgent, parseAgent, readTeam, saveAgent, setTask, stopAgent, teamList, teamStatus, worktreeOf } from './agents'
 import type { AgentSpec, Io, Ran } from './agents'
 import { paneIdFrom, runArgv, tabArgv } from './herdr'
 
@@ -99,7 +99,7 @@ const withAgentAndTask = () => memIo({ '/p/.claude/agents/reviewer.md': agentFil
 const WT = '/p-wt/reviewer'
 const gitRuns = (runs: string[][]) => runs.filter(a => a[0] === 'git').map(a => a.slice(3).join(' '))
 
-test('launch: happy path makes the worktree, then opens the tab in it and runs the agent on the main tree task file', async () => {
+test('launch: happy path makes the worktree, then opens the tab in it and runs the agent on its own copy of the task', async () => {
   const { io, runs } = withAgentAndTask()
   const r = await launchAgent(io, { root: '/p', home: '/h', herdr: H, parent: 'uds:/s.sock' }, 'reviewer')
   expect(r).toEqual({ text: 'Started reviewer in a new tab "reviewer" (pane wC:p3), worktree /p-wt/reviewer on branch helm/reviewer.', isError: false })
@@ -109,7 +109,7 @@ test('launch: happy path makes the worktree, then opens the tab in it and runs t
     ['git', '-C', '/p', 'worktree', 'list', '--porcelain'],
     ['git', '-C', '/p', 'worktree', 'add', WT, '-b', 'helm/reviewer'],
     tabArgv(H, WT, 'reviewer', 'uds:/s.sock'),
-    runArgv(H, 'wC:p3', 'reviewer', handoffPrompt('/p/.claude/helm/task.md', 'helm/reviewer', 'reviewer')),
+    runArgv(H, 'wC:p3', 'reviewer', handoffPrompt('/p/.claude/helm/tasks/reviewer.md', 'helm/reviewer', 'reviewer')),
   ])
   expect(tabArgv(H, WT, 'reviewer', 'uds:/s.sock')).toContain('HELM_PARENT=uds:/s.sock')
   const prompt = handoffPrompt('/p/.claude/helm/task.md', 'helm/reviewer', 'reviewer')
@@ -265,7 +265,7 @@ test('launch: a per-launch model/effort goes into the run command and the reply 
   const r = await launchAgent(io, { root: '/p', home: '/h', herdr: H }, 'reviewer', over)
   expect(r.isError).toBe(false)
   expect(r.text).toContain('Model · effort: sonnet · medium.')
-  expect(runs.at(-1)).toEqual(runArgv(H, 'wC:p3', 'reviewer', handoffPrompt('/p/.claude/helm/task.md', 'helm/reviewer', 'reviewer'), over))
+  expect(runs.at(-1)).toEqual(runArgv(H, 'wC:p3', 'reviewer', handoffPrompt('/p/.claude/helm/tasks/reviewer.md', 'helm/reviewer', 'reviewer'), over))
   expect(String(runs.at(-1)![4])).toContain("--model 'sonnet' --effort 'medium'")
 })
 
@@ -275,4 +275,62 @@ test('launch: an invalid effort is rejected before anything runs', async () => {
   expect(r.isError).toBe(true)
   expect(r.text).toContain('huge')
   expect(runs).toEqual([])
+})
+
+// ── team ──
+const TWO = () => memIo({
+  '/p/.claude/agents/reviewer.md': agentFile(SPEC),
+  '/p/.claude/agents/writer.md': agentFile({ ...SPEC, name: 'writer', model: undefined, effort: undefined }),
+})
+
+test('team: two launches get their own task copies, and a new current task changes neither', async () => {
+  const m = TWO()
+  await setTask(m.io, '/p', 'Review it.', 'Task A')
+  await launchAgent(m.io, { root: '/p', herdr: H }, 'reviewer')
+  await setTask(m.io, '/p', 'Write it.', 'Task B')
+  await launchAgent(m.io, { root: '/p', herdr: H }, 'writer', { model: 'haiku' })
+  await setTask(m.io, '/p', 'Other.', 'Task C')
+  expect(m.files['/p/.claude/helm/tasks/reviewer.md']).toBe('# Task A\n\nReview it.\n')
+  expect(m.files['/p/.claude/helm/tasks/writer.md']).toBe('# Task B\n\nWrite it.\n')
+  const team = await readTeam(m.io, '/p')
+  expect(team.map(t => [t.name, t.goal, t.model, t.effort, t.status, t.pane, t.branch])).toEqual([
+    ['reviewer', 'Task A', 'sonnet', 'high', 'working', 'wC:p3', 'helm/reviewer'],
+    ['writer', 'Task B', 'haiku', 'default', 'working', 'wC:p3', 'helm/writer'],
+  ])
+})
+
+test('team: status updates the member, and an unknown status or name is an error', async () => {
+  const m = TWO()
+  await setTask(m.io, '/p', 'Review it.', 'Task A')
+  await launchAgent(m.io, { root: '/p', herdr: H }, 'reviewer')
+  expect(await teamStatus(m.io, '/p', 'reviewer', 'blocked', 'which API?', 5)).toEqual({ text: 'reviewer: blocked · which API?', isError: false })
+  expect((await readTeam(m.io, '/p'))[0]).toMatchObject({ status: 'blocked', note: 'which API?', at: 5 })
+  expect((await teamStatus(m.io, '/p', 'reviewer', 'huge')).isError).toBe(true)
+  expect((await teamStatus(m.io, '/p', 'nobody', 'done')).isError).toBe(true)
+})
+
+test('team: list marks a pane herdr no longer has as gone', async () => {
+  const m = TWO()
+  await setTask(m.io, '/p', 'Review it.', 'Task A')
+  await launchAgent(m.io, { root: '/p', herdr: H }, 'reviewer')
+  const io = { ...m.io, run: async (argv: string[]) => argv[1] === 'pane' && argv[2] === 'get' ? ok('{"error":{"code":"pane_not_found","message":"pane wC:p3 not found"}}') : m.io.run(argv) }
+  const r = await teamList(io, '/p', H)
+  expect(r.text).toContain('reviewer · sonnet·high · gone')
+  expect((await readTeam(m.io, '/p'))[0]!.status).toBe('gone')
+})
+
+test('team: stop closes the pane and keeps the member as stopped; merge with cleanup removes it', async () => {
+  const m = TWO()
+  await setTask(m.io, '/p', 'Review it.', 'Task A')
+  await launchAgent(m.io, { root: '/p', herdr: H }, 'reviewer')
+  const r = await stopAgent(m.io, '/p', H, 'reviewer')
+  expect(r.isError).toBe(false)
+  expect(m.runs.at(-1)).toEqual([H.bin, 'pane', 'close', 'wC:p3'])
+  expect((await readTeam(m.io, '/p'))[0]!.status).toBe('stopped')
+  await mergeAgent(m.io, { root: '/p' }, 'reviewer', { approve: true, cleanup: true })
+  expect(await readTeam(m.io, '/p')).toEqual([])
+})
+
+test('team: an empty team says how to start one', async () => {
+  expect((await teamList(memIo().io, '/p', H)).text).toContain('No agents on the team')
 })

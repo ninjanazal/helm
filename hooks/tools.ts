@@ -1,5 +1,5 @@
 import type { EngineInterface } from 'claude-code'
-import { EFFORTS, engineIo, launchAgent, listAgents, mergeAgent, agentLine, saveAgent, setTask } from './agents'
+import { EFFORTS, engineIo, launchAgent, listAgents, mergeAgent, agentLine, saveAgent, setTask, stopAgent, teamList, teamStatus, STATUSES } from './agents'
 import type { AgentSpec } from './agents'
 import { atlasTool } from './atlas'
 import { detectHerdr } from './herdr'
@@ -85,7 +85,7 @@ export async function registerHelmTools($: EngineInterface): Promise<void> {
   })
   await $.tool.register({
     name: 'agent_launch',
-    description: 'Starts a saved agent in a new herdr tab named after it, on the current task (.claude/helm/task.md). Needs herdr and an approved task.',
+    description: 'Starts a saved agent in a new herdr tab named after it, on a copy of the current task (.claude/helm/tasks/<name>.md), and adds it to the team. Needs herdr and an approved task.',
     inputSchema: {
       type: 'object',
       required: ['name'],
@@ -101,6 +101,24 @@ export async function registerHelmTools($: EngineInterface): Promise<void> {
     name: 'agent_merge',
     description: "Merges an agent's branch (helm/<name>) into the main tree, locally. Without approve it only shows the diff stat and commits: show them to the person and ask. Call with approve: true only after they said yes; cleanup: true also removes the agent's worktree and branch. Never pushes.",
     inputSchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, approve: { type: 'boolean' }, cleanup: { type: 'boolean' } } },
+    isDeferred: false,
+  })
+  await $.tool.register({
+    name: 'team',
+    description: "Lists the helm agents this session launched (.claude/helm/team.json): name, model·effort, status, age, branch. Checks each pane in herdr and marks closed ones gone.",
+    inputSchema: { type: 'object', properties: {} },
+    isDeferred: false,
+  })
+  await $.tool.register({
+    name: 'team_status',
+    description: 'Records a status an agent reported in a message ("status: working", "status: blocked <question>", "status: done <verdict>"). Call it whenever such a message arrives; the deck TEAM section shows it.',
+    inputSchema: { type: 'object', required: ['name', 'status'], properties: { name: { type: 'string' }, status: { type: 'string', enum: [...STATUSES] }, note: { type: 'string', description: 'The question or verdict, one line' } } },
+    isDeferred: false,
+  })
+  await $.tool.register({
+    name: 'agent_stop',
+    description: 'Stops a helm agent: closes its herdr pane and marks it stopped. Its branch and worktree stay. Only when the person asks.',
+    inputSchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' } } },
     isDeferred: false,
   })
 }
@@ -125,7 +143,7 @@ export async function handleHelmTool($: EngineInterface, tool: string, args: Rec
     const r = await atlasTool($, action, await $.session.cwd().catch(() => undefined))
     return toolText(r.text, r.isError)
   }
-  if (tool === 'mcp__helm__set_task' || tool.startsWith('mcp__helm__agent_')) {
+  if (tool === 'mcp__helm__set_task' || tool === 'mcp__helm__team' || tool === 'mcp__helm__team_status' || tool.startsWith('mcp__helm__agent_')) {
     const root = (await $.session.cwd().catch(() => undefined)) ?? '.'
     const home = (await $.env.get('HOME').catch(() => undefined)) || undefined
     const io = engineIo($)
@@ -159,6 +177,18 @@ export async function handleHelmTool($: EngineInterface, tool: string, args: Rec
       const agentEnv = (await $.env.get('HELM_AGENT').catch(() => undefined)) || undefined
       const sock = ((await $.env.get('CLAUDE_CODE_MESSAGING_SOCKET').catch(() => undefined)) ?? '').trim()
       const r = await launchAgent(io, { root, home, herdr: await detectHerdr($), agentEnv, parent: sock ? `uds:${sock}` : undefined }, name, { model, effort })
+      return toolText(r.text, r.isError)
+    }
+    if (tool === 'mcp__helm__team') {
+      const r = await teamList(io, root, await detectHerdr($))
+      return toolText(r.text, r.isError)
+    }
+    if (tool === 'mcp__helm__team_status') {
+      const r = await teamStatus(io, root, str(args.name)?.trim() ?? '', str(args.status) ?? '', str(args.note))
+      return toolText(r.text, r.isError)
+    }
+    if (tool === 'mcp__helm__agent_stop') {
+      const r = await stopAgent(io, root, await detectHerdr($), str(args.name)?.trim() ?? '')
       return toolText(r.text, r.isError)
     }
     if (tool === 'mcp__helm__agent_merge') {

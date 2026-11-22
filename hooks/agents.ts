@@ -96,7 +96,7 @@ export async function getTask(io: Io, root: string): Promise<string | undefined>
 export function handoffPrompt(taskPath = TASK_FILE, branch?: string, name?: string): string {
   const start = `Read ${taskPath}: it is your task, already approved. Start with the superpowers brainstorming skill if it is available, then plan with writing-plans and build with executing-plans or subagent-driven-development.`
   if (!branch || !name) return start
-  return `${start} You work on branch ${branch} in your own worktree: commit there, never push, never merge into the main tree. When done, message the session in $HELM_PARENT (if set) asking it to merge ${branch}, with a 3-line summary and your verdict as \"Merge: yes or no\" plus one line why (checks run and their result, scope kept, open questions); otherwise end your report with "run /helm:agent merge ${name}". If told the merge conflicted, merge the main branch into ${branch}, resolve, commit and ask again.`
+  return `${start} You work on branch ${branch} in your own worktree: commit there, never push, never merge into the main tree. When done, message the session in $HELM_PARENT (if set) asking it to merge ${branch}, with a 3-line summary and your verdict as \"Merge: yes or no\" plus one line why (checks run and their result, scope kept, open questions); otherwise end your report with "run /helm:agent merge ${name}". If told the merge conflicted, merge the main branch into ${branch}, resolve, commit and ask again. Keep the session in $HELM_PARENT posted with one-line messages starting \"status: working\" (when you start), \"status: blocked <question>\" (when you need a decision) or \"status: done <Merge: yes or no>\" (when finished).`
 }
 
 /** Where agent `name` works: a sibling folder of the main tree, on its own branch. */
@@ -151,9 +151,13 @@ export async function launchAgent(io: Io, ctx: LaunchCtx, name: string, over: { 
   const split = await io.run(tabArgv(ctx.herdr, wt.path ?? ctx.root, name, ctx.parent)).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
   const pane = split.exitCode === 0 ? paneIdFrom(String(split.stdout)) : undefined
   if (!pane) return { text: `Error: herdr did not open a tab: ${String(split.stdout || split.stderr).trim().slice(0, 200)}`, isError: true }
-  const run = await io.run(runArgv(ctx.herdr, pane, name, handoffPrompt(`${ctx.root}/${TASK_FILE}`, branch, name), over)).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+  const task = (await getTask(io, ctx.root))!
+  await io.write(`${ctx.root}/${agentTaskFile(name)}`, task)
+  const run = await io.run(runArgv(ctx.herdr, pane, name, handoffPrompt(`${ctx.root}/${agentTaskFile(name)}`, branch, name), over)).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
   if (run.exitCode !== 0) return { text: `Error: herdr opened tab "${name}" (pane ${pane}) but could not start the agent: ${String(run.stderr || run.stdout).trim().slice(0, 200)}`, isError: true }
   const where = wt.path ? `, worktree ${wt.path} on branch ${branch}${wt.reused ? ' (reused)' : ''}` : ''
+  const saved = all.find(a => a.name === name)!
+  await upsertMember(io, ctx.root, { name, goal: taskGoalOf(task), model: over.model ?? saved.model ?? 'inherit', effort: over.effort ?? saved.effort ?? 'default', branch, worktree: wt.path, pane, startedAt: Date.now(), status: 'working' })
   const used = over.model || over.effort ? ` Model · effort: ${over.model ?? 'agent default'} · ${over.effort ?? 'agent default'}.` : ''
   return { text: `Started ${name} in a new tab "${name}" (pane ${pane})${where}.${used}`, isError: false }
 }
@@ -181,8 +185,86 @@ export async function mergeAgent(io: Io, ctx: { root: string }, name: string, op
   const rm = await git(io, ctx.root, 'worktree', 'remove', path)
   const del = await git(io, ctx.root, 'branch', '-d', branch)
   return rm.exitCode === 0 && del.exitCode === 0
-    ? { text: `Merged ${branch} and removed ${path} and the branch.`, isError: false }
+    ? (await removeMember(io, ctx.root, name), { text: `Merged ${branch} and removed ${path} and the branch.`, isError: false })
     : { text: `Merged ${branch}, but cleanup failed: ${said(rm.exitCode === 0 ? del : rm)}`, isError: true }
+}
+
+// ── team ──────────────────────────────────────────────────
+export const TEAM_FILE = '.claude/helm/team.json'
+export const agentTaskFile = (name: string) => `.claude/helm/tasks/${name}.md`
+export const STATUSES = ['working', 'blocked', 'done', 'stopped'] as const
+export type Status = (typeof STATUSES)[number] | 'gone'
+export type Member = { name: string; goal: string; model: string; effort: string; branch?: string; worktree?: string; pane: string; startedAt: number; status: Status; note?: string; at?: number }
+
+const taskGoalOf = (task: string) => task.split('\n').find(l => l.startsWith('# '))?.slice(2).trim() || oneLine(task).slice(0, 80)
+
+export async function readTeam(io: Io, root: string): Promise<Member[]> {
+  const t = await io.read(`${root}/${TEAM_FILE}`).catch(() => undefined)
+  if (!t) return []
+  try {
+    const j = JSON.parse(t)
+    return Array.isArray(j) ? j : []
+  } catch {
+    return []
+  }
+}
+const writeTeam = (io: Io, root: string, team: Member[]) => io.write(`${root}/${TEAM_FILE}`, JSON.stringify(team, null, 2) + '\n')
+async function upsertMember(io: Io, root: string, m: Member) {
+  await writeTeam(io, root, [...(await readTeam(io, root)).filter(x => x.name !== m.name), m])
+}
+async function removeMember(io: Io, root: string, name: string) {
+  const team = await readTeam(io, root)
+  if (team.some(m => m.name === name)) await writeTeam(io, root, team.filter(m => m.name !== name))
+}
+
+/** Records what an agent reported (status: working | blocked <q> | done <verdict>). */
+export async function teamStatus(io: Io, root: string, name: string, status: string, note?: string, now = Date.now()): Promise<Answer> {
+  if (!(STATUSES as readonly string[]).includes(status)) return { text: `Error: status "${status}" is not one of ${STATUSES.join(', ')}.`, isError: true }
+  const team = await readTeam(io, root)
+  const m = team.find(x => x.name === name)
+  if (!m) return { text: `Error: ${name} is not on the team. Team: ${team.map(x => x.name).join(', ') || 'none'}.`, isError: true }
+  m.status = status as Status
+  m.at = now
+  if (note?.trim()) m.note = oneLine(note).slice(0, 200)
+  else delete m.note
+  await writeTeam(io, root, team)
+  return { text: `${name}: ${status}${m.note ? ` · ${m.note}` : ''}`, isError: false }
+}
+
+/** herdr answers `pane get` for a closed pane with error code pane_not_found (exit 0). */
+export const paneGone = (r: Ran) => /"code"\s*:\s*"pane_not_found"/.test(String(r.stdout) + String(r.stderr))
+
+/** The team, with panes herdr no longer has marked gone (saved). */
+export async function teamList(io: Io, root: string, herdr: { bin: string } | null, now = Date.now()): Promise<Answer> {
+  const team = await readTeam(io, root)
+  if (!team.length) return { text: 'No agents on the team. Launch one with /helm:agent <name>, or split the task with /helm:agent team.', isError: false }
+  let changed = false
+  if (herdr) {
+    for (const m of team) {
+      if (m.status === 'stopped' || m.status === 'gone') continue
+      const r = await io.run([herdr.bin, 'pane', 'get', m.pane]).catch((err: unknown): Ran => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+      if (paneGone(r)) { m.status = 'gone'; m.at = now; changed = true }
+    }
+  }
+  if (changed) await writeTeam(io, root, team)
+  return { text: team.map(m => memberLine(m, now)).join('\n'), isError: false }
+}
+
+export const ago = (ms: number) => (ms < 60_000 ? `${Math.max(0, Math.round(ms / 1000))}s` : ms < 3_600_000 ? `${Math.round(ms / 60_000)}m` : `${Math.round(ms / 3_600_000)}h`)
+export const memberLine = (m: Member, now: number) => `${m.name} · ${m.model}·${m.effort} · ${m.status}${m.note ? ` (${m.note})` : ''} · ${ago(now - m.startedAt)} · ${m.branch ?? 'main tree'}`
+
+/** Closes the agent's pane; keeps its branch and worktree. */
+export async function stopAgent(io: Io, root: string, herdr: { bin: string } | null, name: string, now = Date.now()): Promise<Answer> {
+  const team = await readTeam(io, root)
+  const m = team.find(x => x.name === name)
+  if (!m) return { text: `Error: ${name} is not on the team.`, isError: true }
+  if (!herdr) return { text: 'Stopping an agent needs herdr: run Claude Code inside herdr.', isError: true }
+  const r = await io.run([herdr.bin, 'pane', 'close', m.pane]).catch((err: unknown): Ran => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+  if (r.exitCode !== 0 && !paneGone(r)) return { text: `Error: herdr could not close pane ${m.pane}: ${said(r)}`, isError: true }
+  m.status = 'stopped'
+  m.at = now
+  await writeTeam(io, root, team)
+  return { text: `Stopped ${name} (pane ${m.pane} closed). ${m.branch ? `Its work stays on ${m.branch}: merge it with /helm:agent merge ${name}, or launch it again to continue.` : ''}`.trim(), isError: false }
 }
 
 /** The engine-backed Io. */
