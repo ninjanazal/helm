@@ -1,10 +1,10 @@
 import type { EngineInterface } from 'claude-code'
-import { paneIdFrom, runArgv, splitArgv } from './herdr'
+import { paneIdFrom, runArgv, tabArgv } from './herdr'
 import type { Herdr } from './herdr'
 
 /**
  * /helm:agent: agents are Claude Code agent files (.claude/agents/<name>.md in the project, ~/.claude/agents in
- * the user's home), started in their own herdr pane with `claude --agent <name>` on the approved task in
+ * the user's home), started in their own herdr tab, labelled with the agent's name, with `claude --agent <name>` on the approved task in
  * .claude/helm/task.md. Everything here goes through `Io`, so it is tested without an engine.
  */
 
@@ -99,22 +99,22 @@ export function handoffPrompt(): string {
 
 export type LaunchCtx = { root: string; home?: string; herdr: Herdr | null; agentEnv?: string }
 
-/** Opens a herdr pane right of this one and starts `claude --agent <name>` on the task file. */
+/** Opens a herdr tab named after the agent and starts `claude --agent <name>` on the task file. */
 export async function launchAgent(io: Io, ctx: LaunchCtx, name: string): Promise<Answer> {
   if (ctx.agentEnv?.trim()) return { text: `Error: this session is the helm agent ${ctx.agentEnv}; agents do not start other agents.`, isError: true }
-  if (!ctx.herdr) return { text: 'Starting an agent needs herdr: run Claude Code inside a herdr pane. Saved agents stay in .claude/agents/.', isError: false }
+  if (!ctx.herdr) return { text: 'Starting an agent needs herdr: run Claude Code inside herdr. Saved agents stay in .claude/agents/.', isError: false }
   if (!(await getTask(io, ctx.root))) return { text: 'There is no approved task yet. Run /helm:prompt <request> first, then /helm:agent.', isError: false }
   const all = await listAgents(io, ctx.root, ctx.home)
   if (!all.some(a => a.name === name && a.ok)) {
     const names = all.filter(a => a.ok).map(a => a.name)
     return { text: `Error: no agent "${name}". ${names.length ? `Agents: ${names.join(', ')}.` : 'No agents saved yet: run /helm:agent to define one.'}`, isError: true }
   }
-  const split = await io.run(splitArgv(ctx.herdr, ctx.root, name)).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+  const split = await io.run(tabArgv(ctx.herdr, ctx.root, name)).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
   const pane = split.exitCode === 0 ? paneIdFrom(String(split.stdout)) : undefined
-  if (!pane) return { text: `Error: herdr did not open a pane: ${String(split.stdout || split.stderr).trim().slice(0, 200)}`, isError: true }
+  if (!pane) return { text: `Error: herdr did not open a tab: ${String(split.stdout || split.stderr).trim().slice(0, 200)}`, isError: true }
   const run = await io.run(runArgv(ctx.herdr, pane, name, handoffPrompt())).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
-  if (run.exitCode !== 0) return { text: `Error: herdr opened pane ${pane} but could not start the agent: ${String(run.stderr || run.stdout).trim().slice(0, 200)}`, isError: true }
-  return { text: `Started ${name} in pane ${pane}.`, isError: false }
+  if (run.exitCode !== 0) return { text: `Error: herdr opened tab "${name}" (pane ${pane}) but could not start the agent: ${String(run.stderr || run.stdout).trim().slice(0, 200)}`, isError: true }
+  return { text: `Started ${name} in a new tab "${name}" (pane ${pane}).`, isError: false }
 }
 
 /** The engine-backed Io. */

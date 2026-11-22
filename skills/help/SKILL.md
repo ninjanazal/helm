@@ -11,8 +11,8 @@ Show the person the guide below as it is, then offer to answer any question abou
 | Command | What it does |
 | --- | --- |
 | `/helm:prompt <request>` | Start a task: re-anchors the deck, builds a complete prompt (goal, context, scope, acceptance checks, stop conditions), and once you approve it saves it as the current task. Then work on it here, or hand it off. |
-| `/helm:agent` | Define an agent for the current task with Claude, save it to `.claude/agents/<name>.md`, and start it in a new herdr pane on the task. |
-| `/helm:agent <name>` | Start a saved agent in a new herdr pane on the current task. |
+| `/helm:agent` | Define an agent for the current task with Claude, save it to `.claude/agents/<name>.md`, and start it in a new herdr tab named after it on the task. |
+| `/helm:agent <name>` | Start a saved agent in a new herdr tab named after it on the current task. |
 | `/helm:agent list` | Saved agents: name, model, effort, tools, project or user, what it is for. |
 | `/helm:deck` | Open the deck pane. |
 | `/helm:deck on` / `off` | Turn the deck on or off for this project. Off stays off across `/clear` and new sessions. |
@@ -28,7 +28,7 @@ Drift = 0.4 × context fill + 0.4 × topic shift (new terms vs. the task) + 0.2 
 
 ## Agents
 - The current task lives in `.claude/helm/task.md` (git-ignored). Each approved `/helm:prompt` replaces it.
-- An agent pane runs `claude --agent <name>` with `HELM_AGENT=<name>` set: no deck there, and it does not start agents of its own. It reads the task file and starts with superpowers brainstorming when installed.
+- An agent tab runs `claude --agent <name>` with `HELM_AGENT=<name>` set: no deck there, and it does not start agents of its own. It reads the task file and starts with superpowers brainstorming when installed.
 - Agents need herdr. Without it, `/helm:agent` still saves the definition and `list` works.
 
 ## atlas

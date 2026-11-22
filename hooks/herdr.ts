@@ -27,9 +27,13 @@ export function resetHerdr(preset?: Herdr | null) {
   found = preset
 }
 
-/** argv to open a pane right of `h.pane` in `cwd`, marked as a helm agent session, without stealing focus. */
-export function splitArgv(h: Herdr, cwd: string, name: string): string[] {
-  return [h.bin, 'pane', 'split', h.pane, '--direction', 'right', '--cwd', cwd, '--env', `HELM_AGENT=${name}`, '--no-focus']
+/**
+ * argv to open a new tab labelled `name` in this pane's workspace (pane ids are `<workspace>:<pane>`), in `cwd`,
+ * marked as a helm agent session, without stealing focus.
+ */
+export function tabArgv(h: Herdr, cwd: string, name: string): string[] {
+  const ws = h.pane.split(':')[0]!
+  return [h.bin, 'tab', 'create', '--workspace', ws, '--cwd', cwd, '--label', name, '--env', `HELM_AGENT=${name}`, '--no-focus']
 }
 
 /** POSIX single-quoting: safe for any text. */
@@ -43,7 +47,7 @@ export function runArgv(h: Herdr, pane: string, name: string, prompt: string): s
   return [h.bin, 'pane', 'run', pane, `claude --agent ${shq(name)} ${shq(prompt)}`]
 }
 
-/** The new pane's id from herdr's JSON reply: the first `pane_id` under `result`. */
+/** The new pane's id from herdr's JSON reply (a tab's root pane): the first `pane_id` under `result`. */
 export function paneIdFrom(stdout: string): string | undefined {
   let j: unknown
   try {

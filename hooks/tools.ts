@@ -85,7 +85,7 @@ export async function registerHelmTools($: EngineInterface): Promise<void> {
   })
   await $.tool.register({
     name: 'agent_launch',
-    description: 'Starts a saved agent in a new herdr pane on the current task (.claude/helm/task.md). Needs herdr and an approved task.',
+    description: 'Starts a saved agent in a new herdr tab named after it, on the current task (.claude/helm/task.md). Needs herdr and an approved task.',
     inputSchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' } } },
     isDeferred: false,
   })

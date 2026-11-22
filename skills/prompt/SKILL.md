@@ -77,4 +77,4 @@ Show the prompt in one fenced block, then one line: "Approve it, edit it, or cha
 On approval call `mcp__helm__set_task` with `{ "prompt": "<the approved prompt, whole>", "goal": "<the goal in one line>" }`.
 Then stop and offer the two ways on, in two lines:
 - **Work on it here**: say so and this session does it, starting with the superpowers brainstorming skill if it is installed (otherwise straight from the prompt, as the contract), finishing with the `<output>` report checked against `<acceptance>`.
-- **Hand it off**: `/helm:agent <name>` sends it to a saved agent in a new herdr pane; `/helm:agent` defines a new agent for it first; `/helm:agent list` shows the saved ones.
+- **Hand it off**: `/helm:agent <name>` sends it to a saved agent in a new herdr tab named after it; `/helm:agent` defines a new agent for it first; `/helm:agent list` shows the saved ones.

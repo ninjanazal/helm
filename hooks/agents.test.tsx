@@ -1,19 +1,22 @@
 import { expect, test } from 'claude-code/testing'
 import { agentFile, agentLine, getTask, handoffPrompt, launchAgent, listAgents, parseAgent, saveAgent, setTask } from './agents'
 import type { AgentSpec, Io } from './agents'
-import { paneIdFrom, runArgv, splitArgv } from './herdr'
+import { paneIdFrom, runArgv, tabArgv } from './herdr'
 
 const SPEC: AgentSpec = { name: 'reviewer', description: 'Reviews diffs', model: 'sonnet', effort: 'high', tools: ['Read', 'Grep'], instructions: 'Review the change.\nBe brief.' }
 const H = { bin: '/bin/herdr', pane: 'wC:p1' }
 
 /** An in-memory project: files by absolute path, and every command run. */
-function memIo(files: Record<string, string> = {}, split = '{"id":"x","result":{"pane":{"pane_id":"wC:p3"}}}') {
+// Real `herdr tab create` reply (trimmed).
+const TAB_REPLY = '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"wC:p3","tab_id":"wC:t4","workspace_id":"wC"},"tab":{"label":"reviewer","tab_id":"wC:t4","workspace_id":"wC"},"type":"tab_created"}}'
+
+function memIo(files: Record<string, string> = {}, split = TAB_REPLY) {
   const runs: string[][] = []
   const io: Io = {
     read: async p => { if (!(p in files)) throw new Error('ENOENT'); return files[p]! },
     list: async d => Object.keys(files).filter(p => p.startsWith(`${d}/`) && !p.slice(d.length + 1).includes('/')).map(p => p.slice(d.length + 1)),
     write: async (p, t) => { files[p] = t },
-    run: async argv => { runs.push(argv); return { exitCode: 0, stdout: argv[2] === 'split' ? split : '', stderr: '' } },
+    run: async argv => { runs.push(argv); return { exitCode: 0, stdout: argv[1] === 'tab' ? split : '', stderr: '' } },
   }
   return { io, files, runs }
 }
@@ -59,8 +62,9 @@ test('task file: set writes goal and prompt, get reads it back', async () => {
   expect(await getTask(io, '/p')).toBe('# Add a flag\n\nFull prompt.\n')
 })
 
-test('herdr argv: split right with the agent env, run claude --agent; pane id from the JSON', () => {
-  expect(splitArgv(H, '/p', 'reviewer')).toEqual(['/bin/herdr', 'pane', 'split', 'wC:p1', '--direction', 'right', '--cwd', '/p', '--env', 'HELM_AGENT=reviewer', '--no-focus'])
+test('herdr argv: a new tab labelled with the agent, in this workspace, with the agent env; run claude --agent; pane id from the JSON', () => {
+  expect(tabArgv(H, '/p', 'reviewer')).toEqual(['/bin/herdr', 'tab', 'create', '--workspace', 'wC', '--cwd', '/p', '--label', 'reviewer', '--env', 'HELM_AGENT=reviewer', '--no-focus'])
+  expect(paneIdFrom(TAB_REPLY)).toBe('wC:p3')
   // herdr types `run`'s words into the pane's shell joined by spaces: the command goes as one shell-quoted string.
   expect(runArgv(H, 'wC:p3', 'reviewer', "go: it's here")).toEqual(['/bin/herdr', 'pane', 'run', 'wC:p3', "claude --agent 'reviewer' 'go: it'\\''s here'"])
   expect(paneIdFrom('{"id":"x","result":{"pane":{"pane_id":"wC:p3"}}}')).toBe('wC:p3')
@@ -69,11 +73,11 @@ test('herdr argv: split right with the agent env, run claude --agent; pane id fr
 
 const withAgentAndTask = () => memIo({ '/p/.claude/agents/reviewer.md': agentFile(SPEC), '/p/.claude/helm/task.md': '# Goal\n\nPrompt.\n' })
 
-test('launch: happy path splits a pane and runs the agent on the task file', async () => {
+test('launch: happy path opens a named tab and runs the agent on the task file', async () => {
   const { io, runs } = withAgentAndTask()
   const r = await launchAgent(io, { root: '/p', home: '/h', herdr: H }, 'reviewer')
-  expect(r).toEqual({ text: 'Started reviewer in pane wC:p3.', isError: false })
-  expect(runs).toEqual([splitArgv(H, '/p', 'reviewer'), runArgv(H, 'wC:p3', 'reviewer', handoffPrompt())])
+  expect(r).toEqual({ text: 'Started reviewer in a new tab "reviewer" (pane wC:p3).', isError: false })
+  expect(runs).toEqual([tabArgv(H, '/p', 'reviewer'), runArgv(H, 'wC:p3', 'reviewer', handoffPrompt())])
   expect(handoffPrompt()).toBe('Read .claude/helm/task.md: it is your task, already approved. Start with the superpowers brainstorming skill if it is available, then plan and build it.')
 })
 
@@ -91,7 +95,7 @@ test('launch refuses without a task, outside herdr, inside an agent, or for an u
   expect(out.runs).toEqual([])
 })
 
-test('launch: a split reply without a pane id is an error carrying herdr output', async () => {
+test('launch: a tab reply without a pane id is an error carrying herdr output', async () => {
   const { io } = memIo({ '/p/.claude/agents/reviewer.md': agentFile(SPEC), '/p/.claude/helm/task.md': 'x' }, 'weird output')
   const r = await launchAgent(io, { root: '/p', home: '/h', herdr: H }, 'reviewer')
   expect(r.isError).toBe(true)

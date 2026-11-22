@@ -1,6 +1,6 @@
 ---
 name: agent
-description: Hand the current approved task to an agent in its own herdr pane, define and save a new agent for it, or list saved agents. Use when the person runs /helm:agent or asks to send the task to another agent or session.
+description: Hand the current approved task to an agent in its own herdr tab, define and save a new agent for it, or list saved agents. Use when the person runs /helm:agent or asks to send the task to another agent or session.
 argument-hint: "[list | <name>]"
 ---
 

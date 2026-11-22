@@ -6,7 +6,7 @@ Date: 2026-11-21 · Status: draft for approval
 
 Everything helm offers is reached as `/helm:<verb>`. The previous approach (team mode: a fixed crew of job-contract
 subagents in a team pane) is dropped. helm becomes: the deck pane, a prompt builder that is always used for new work,
-agents handed tasks in their own herdr pane, and atlas.
+agents handed tasks in their own herdr tab, and atlas.
 
 Why: one predictable namespace; commands that do exactly what they say (`deck off` means off); and a forced path
 through prompt-building so work starts from a complete, checkable prompt instead of a rough request.
@@ -22,7 +22,7 @@ through prompt-building so work starts from a complete, checkable prompt instead
 ## Non-goals
 
 - No team mode, team pane, team queue, team files, job contracts or member guardrails.
-- No multi-agent orchestration inside one session (agents run in their own herdr pane / session).
+- No multi-agent orchestration inside one session (agents run in their own herdr tab / session).
 - No agent support outside herdr beyond `list`.
 
 ## Anti-goals (failure even if it "works")
@@ -88,8 +88,10 @@ tools; body: instructions). *My call:* this folder, because `claude --agent <nam
   task with the person (role, model, effort, tools, instructions), asks for a name, writes
   `.claude/agents/<name>.md`, then launches it as below. Needs the model, so this path hands off to the model
   (under A: the command returns/injects an instruction for the model; under B: the skill does it).
-- **`/helm:agent <name>`:** split a new herdr pane and run `claude --agent <name> "<current task>"` in it
-  (`herdr pane split`, `herdr pane run`). No model turn under A. Unknown name → list the available agents.
+- **`/helm:agent <name>`:** open a new herdr tab labelled `<name>` in the current workspace (`herdr tab create
+  --label <name> --no-focus`) and run `claude --agent <name>` on the task in its root pane (`herdr pane run`).
+  *Changed at the person's request (2026-11-22): a named tab per agent, not a split pane.* Unknown name → list the
+  available agents.
 - **`/helm:agent list`:** one line per agent: name, model, effort, tools, one-line description. Works without herdr.
 - **The current task** is the latest approved `/helm:prompt` prompt. If there is none, *my call:* say so and offer
   `/helm:prompt` first rather than sending the raw conversation.
@@ -139,5 +141,4 @@ tools; body: instructions). *My call:* this folder, because `claude --agent <nam
 - Exact store keys and how `deck off` survives `/clear` (there is a `deckCleared` reopen path to gate).
 - How the skill re-anchors the deck (tool vs command).
 - Under A, how the no-name `helm:agent` path passes control to the model.
-- How `herdr pane split` direction/size is chosen (default: split right of the current pane).
 - Whether to keep the herdr display summary (e.g. "claude · agent <name> launched").
