@@ -1,5 +1,5 @@
 import type { EngineInterface } from 'claude-code'
-import { engineIo, launchAgent, listAgents, mergeAgent, agentLine, saveAgent, setTask } from './agents'
+import { EFFORTS, engineIo, launchAgent, listAgents, mergeAgent, agentLine, saveAgent, setTask } from './agents'
 import type { AgentSpec } from './agents'
 import { atlasTool } from './atlas'
 import { detectHerdr } from './herdr'
@@ -86,7 +86,15 @@ export async function registerHelmTools($: EngineInterface): Promise<void> {
   await $.tool.register({
     name: 'agent_launch',
     description: 'Starts a saved agent in a new herdr tab named after it, on the current task (.claude/helm/task.md). Needs herdr and an approved task.',
-    inputSchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' } } },
+    inputSchema: {
+      type: 'object',
+      required: ['name'],
+      properties: {
+        name: { type: 'string' },
+        model: { type: 'string', description: 'Model for this launch only, e.g. opus, sonnet, haiku or a full ID; leave out to use the agent\'s own' },
+        effort: { type: 'string', enum: EFFORTS, description: 'Effort for this launch only; leave out to use the agent\'s own' },
+      },
+    },
     isDeferred: false,
   })
   await $.tool.register({
@@ -145,9 +153,12 @@ export async function handleHelmTool($: EngineInterface, tool: string, args: Rec
     if (tool === 'mcp__helm__agent_launch') {
       const name = str(args.name)?.trim()
       if (!name) return toolText('Error: agent_launch needs a name.', true)
+      const model = str(args.model)?.trim() || undefined
+      const effort = str(args.effort)?.trim() || undefined
+      if (effort && !EFFORTS.includes(effort)) return toolText(`Error: effort is one of ${EFFORTS.join(', ')}.`, true)
       const agentEnv = (await $.env.get('HELM_AGENT').catch(() => undefined)) || undefined
       const sock = ((await $.env.get('CLAUDE_CODE_MESSAGING_SOCKET').catch(() => undefined)) ?? '').trim()
-      const r = await launchAgent(io, { root, home, herdr: await detectHerdr($), agentEnv, parent: sock ? `uds:${sock}` : undefined }, name)
+      const r = await launchAgent(io, { root, home, herdr: await detectHerdr($), agentEnv, parent: sock ? `uds:${sock}` : undefined }, name, { model, effort })
       return toolText(r.text, r.isError)
     }
     if (tool === 'mcp__helm__agent_merge') {

@@ -43,9 +43,11 @@ export const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
 /**
  * argv to start the agent's Claude session in `pane`. herdr types `run`'s words into the pane's shell joined by
  * spaces, unquoted, so the command goes as one string with the prompt shell-quoted (names are [a-z0-9-] only).
+ * `over` is a per-launch model/effort; each flag is added only when set.
  */
-export function runArgv(h: Herdr, pane: string, name: string, prompt: string): string[] {
-  return [h.bin, 'pane', 'run', pane, `claude --agent ${shq(name)} ${shq(prompt)}`]
+export function runArgv(h: Herdr, pane: string, name: string, prompt: string, over: { model?: string; effort?: string } = {}): string[] {
+  const flags = `${over.model ? ` --model ${shq(over.model)}` : ''}${over.effort ? ` --effort ${shq(over.effort)}` : ''}`
+  return [h.bin, 'pane', 'run', pane, `claude --agent ${shq(name)}${flags} ${shq(prompt)}`]
 }
 
 /** The new pane's id from herdr's JSON reply (a tab's root pane): the first `pane_id` under `result`. */

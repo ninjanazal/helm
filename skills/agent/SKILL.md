@@ -12,7 +12,17 @@ The current task is the prompt approved with `/helm:prompt`, saved in `.claude/h
 Call `mcp__helm__agent_list` and show its reply as is.
 
 ## `/helm:agent <name>`
-Call `mcp__helm__agent_launch` with `{ "name": "<name>" }` and show its reply as is. Nothing else. In a git repo the agent gets its own worktree (`../<repo>-wt/<name>`) on branch `helm/<name>`.
+Pick the model and effort first, see "Before any launch" below, then call `mcp__helm__agent_launch` and show its reply as is. In a git repo the agent gets its own worktree (`../<repo>-wt/<name>`) on branch `helm/<name>`.
+
+## Before any launch
+Read `.claude/helm/task.md` and the agent's saved model and effort (`mcp__helm__agent_list`). Show one line:
+`Suggested: <model> · <effort> · confidence <0-100>% (<one-line reason>)`
+Default to the agent's saved model and effort; suggest others only when the task calls for them (cheapest that can do it well). Confidence is your own estimate, not a score.
+Then ask: "Launch with this, change it, or use the agent's default?" Call `agent_launch` only after the answer:
+- launch with this: `{ "name": "<name>", "model": "<m>", "effort": "<e>" }`
+- change it: the person's model and/or effort, effort one of `low|medium|high|xhigh|max`
+- agent's default: `{ "name": "<name>" }`
+The override is for this launch only; the saved agent file is not changed.
 
 ## `/helm:agent merge <name>`
 Call `mcp__helm__agent_merge` with `{ "name": "<name>" }`, show the diff stat and commits, and ask in one line: "Merge helm/<name> into the main tree?" On yes call it again with `approve: true` (add `cleanup: true` only if they also want the worktree and branch removed). Show the reply as is. Merge one agent at a time; never push.
@@ -30,6 +40,6 @@ An agent's message asking to merge `helm/<name>` is the same as `/helm:agent mer
    - `instructions`: how this agent works, its boundaries and what it hands back. Specific to its role, not to this one task (the task arrives separately), so it can be reused. No persona text.
 4. Show the draft in one block, then ask in one line: "Save it as `<name>`, change something, or rename?"
 5. On approval call `mcp__helm__agent_save` with the fields. If the name exists, ask before passing `overwrite: true`.
-6. Call `mcp__helm__agent_launch` with the name and show its reply as is. Outside herdr it says so; the agent stays saved for later.
+6. Do "Before any launch", then call `mcp__helm__agent_launch` with the name and the confirmed model and effort, and show its reply as is. Outside herdr it says so; the agent stays saved for later.
 
 If superpowers is installed, the launched agent follows writing-plans, then executing-plans or subagent-driven-development (the hand-off prompt says so).

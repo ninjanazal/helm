@@ -123,9 +123,15 @@ async function ensureWorktree(io: Io, root: string, name: string): Promise<{ pat
   return add.exitCode === 0 ? { path } : { error: `Error: could not create the worktree ${path} on ${branch}: ${said(add)}` }
 }
 
-/** Opens a herdr tab named after the agent, in its own git worktree, and starts `claude --agent <name>` on the task file. */
-export async function launchAgent(io: Io, ctx: LaunchCtx, name: string): Promise<Answer> {
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+
+/**
+ * Opens a herdr tab named after the agent, in its own git worktree, and starts `claude --agent <name>` on the task file.
+ * `over` sets model/effort for this launch only (the saved agent file is not rewritten); the reply names what was used.
+ */
+export async function launchAgent(io: Io, ctx: LaunchCtx, name: string, over: { model?: string; effort?: string } = {}): Promise<Answer> {
   if (!NAME_RE.test(name)) return { text: `Error: "${name}" is not a valid agent name (lowercase letters, digits and -).`, isError: true }
+  if (over.effort && !EFFORTS.includes(over.effort)) return { text: `Error: effort "${over.effort}" is not one of ${EFFORTS.join(', ')}.`, isError: true }
   if (ctx.agentEnv?.trim()) return { text: `Error: this session is the helm agent ${ctx.agentEnv}; agents do not start other agents.`, isError: true }
   if (!ctx.herdr) return { text: 'Starting an agent needs herdr: run Claude Code inside herdr. Saved agents stay in .claude/agents/.', isError: false }
   if (!(await getTask(io, ctx.root))) return { text: 'There is no approved task yet. Run /helm:prompt <request> first, then /helm:agent.', isError: false }
@@ -140,10 +146,11 @@ export async function launchAgent(io: Io, ctx: LaunchCtx, name: string): Promise
   const split = await io.run(tabArgv(ctx.herdr, wt.path ?? ctx.root, name, ctx.parent)).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
   const pane = split.exitCode === 0 ? paneIdFrom(String(split.stdout)) : undefined
   if (!pane) return { text: `Error: herdr did not open a tab: ${String(split.stdout || split.stderr).trim().slice(0, 200)}`, isError: true }
-  const run = await io.run(runArgv(ctx.herdr, pane, name, handoffPrompt(`${ctx.root}/${TASK_FILE}`, branch, name))).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+  const run = await io.run(runArgv(ctx.herdr, pane, name, handoffPrompt(`${ctx.root}/${TASK_FILE}`, branch, name), over)).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
   if (run.exitCode !== 0) return { text: `Error: herdr opened tab "${name}" (pane ${pane}) but could not start the agent: ${String(run.stderr || run.stdout).trim().slice(0, 200)}`, isError: true }
   const where = wt.path ? `, worktree ${wt.path} on branch ${branch}${wt.reused ? ' (reused)' : ''}` : ''
-  return { text: `Started ${name} in a new tab "${name}" (pane ${pane})${where}.`, isError: false }
+  const used = over.model || over.effort ? ` Model · effort: ${over.model ?? 'agent default'} · ${over.effort ?? 'agent default'}.` : ''
+  return { text: `Started ${name} in a new tab "${name}" (pane ${pane})${where}.${used}`, isError: false }
 }
 
 /**

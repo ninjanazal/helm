@@ -86,6 +86,14 @@ test('herdr argv: a new tab labelled with the agent, in this workspace, with the
   expect(paneIdFrom('nope')).toBe(undefined)
 })
 
+test('herdr argv: model and effort flags are shell-quoted and only added when set', () => {
+  const base = "claude --agent 'reviewer' 'go'"
+  expect(runArgv(H, 'wC:p3', 'reviewer', 'go', {})[4]).toBe(base)
+  expect(runArgv(H, 'wC:p3', 'reviewer', 'go', { model: 'sonnet', effort: 'medium' })[4]).toBe("claude --agent 'reviewer' --model 'sonnet' --effort 'medium' 'go'")
+  expect(runArgv(H, 'wC:p3', 'reviewer', 'go', { effort: 'low' })[4]).toBe("claude --agent 'reviewer' --effort 'low' 'go'")
+  expect(runArgv(H, 'wC:p3', 'reviewer', 'go', { model: "x'y" })[4]).toBe("claude --agent 'reviewer' --model 'x'\\''y' 'go'")
+})
+
 const withAgentAndTask = () => memIo({ '/p/.claude/agents/reviewer.md': agentFile(SPEC), '/p/.claude/helm/task.md': '# Goal\n\nPrompt.\n' })
 
 const WT = '/p-wt/reviewer'
@@ -241,4 +249,22 @@ test('tools through the engine: an agent session cannot call agent_merge', async
   on('env.get', (_, e) => ({ value: JSON.stringify(e).includes('HELM_AGENT') ? 'reviewer' : undefined }) as never)
   const r = (await $.tool.call({ tool: 'mcp__helm__agent_merge', name: 'reviewer', approve: true } as never)) as { result?: string; deny?: string }
   expect(String(r.result ?? r.deny)).toContain('only the main session merges')
+})
+
+test('launch: a per-launch model/effort goes into the run command and the reply names it', async () => {
+  const { io, runs } = withAgentAndTask()
+  const over = { model: 'sonnet', effort: 'medium' }
+  const r = await launchAgent(io, { root: '/p', home: '/h', herdr: H }, 'reviewer', over)
+  expect(r.isError).toBe(false)
+  expect(r.text).toContain('Model · effort: sonnet · medium.')
+  expect(runs.at(-1)).toEqual(runArgv(H, 'wC:p3', 'reviewer', handoffPrompt('/p/.claude/helm/task.md', 'helm/reviewer', 'reviewer'), over))
+  expect(String(runs.at(-1)![4])).toContain("--model 'sonnet' --effort 'medium'")
+})
+
+test('launch: an invalid effort is rejected before anything runs', async () => {
+  const { io, runs } = withAgentAndTask()
+  const r = await launchAgent(io, { root: '/p', home: '/h', herdr: H }, 'reviewer', { effort: 'huge' })
+  expect(r.isError).toBe(true)
+  expect(r.text).toContain('huge')
+  expect(runs).toEqual([])
 })
