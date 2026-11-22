@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import { DRIFT_AT, PANE_FRAME_MS, deck, drift, isDeckOn, layout, parseWorktrees, terms, topicShift, verdict } from './deck-core'
+import { DRIFT_AT, PANE_FRAME_MS, deck, drift, isDeckOn, layout, parseWorktrees, taskGoal, terms, tokenSplit, topicShift, verdict } from './deck-core'
 import type { DeckData, FeedItem } from './deck-core'
 import type { DeckDone, DeckState } from '../types'
 import { atlasBin } from './atlas'
@@ -103,7 +103,6 @@ function view(s: DeckState): DeckData {
   return {
     ...s,
     limits: s.limits ?? [],
-    costStartAt: s.startedAt,
     drift: drift(pct, topicShift(new Set(s.taskTerms), recent), s.turns),
     running,
   }
@@ -159,7 +158,14 @@ export async function deckStart($: EngineInterface) {
   let agent: string | undefined
   await quiet(async () => { stored = await $.store.get(await onKey($)) })
   await quiet(async () => { agent = await $.env.get('HELM_AGENT') })
-  deckIsOn = isDeckOn(stored, agent)
+  deckIsOn = isDeckOn(stored)
+  // An agent tab's first prompt is the hand-off line, not the task: anchor its deck to the task's goal instead.
+  if (deckIsOn && agent?.trim()) {
+    await quiet(async () => {
+      const goal = taskGoal(await $.fs.read(`${await $.session.cwd()}/.claude/helm/task.md`))
+      if (goal) await deckTask($, goal)
+    })
+  }
   // /clear and /new fire session.start again: only the newest registration's timers do work.
   const gen = ++tickGen
   $.clock.every(PANE_FRAME_MS, () => void (gen === tickGen && deckIsOn && running && quiet(() => update($, frame, f => f + 1))))
@@ -213,7 +219,7 @@ export async function deckPrompt($: EngineInterface, e: { text: string; isMeta?:
   })
 }
 
-const totalTok = (s: DeckState) => s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.cacheWrite
+const totalTok = (s: DeckState) => tokenSplit(s.tokens).total
 
 export async function deckTurnDone($: EngineInterface, e: { agentId?: string }) {
   if (e.agentId) return

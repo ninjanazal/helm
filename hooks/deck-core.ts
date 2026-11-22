@@ -22,7 +22,6 @@ export type DeckData = {
   limits: { kind: string; percentUsed: number; resetsAt?: string | number }[]
   compactions: number
   cost?: number
-  costStartAt?: number
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }
   day?: number
   atlas?: { files: number; symbols?: number; queries: number; returned: number; avoided: number; on: boolean; state?: string; pending?: number; changed?: number; added?: number; removed?: number; indexedAt?: number; code_files?: number; code_with_symbols?: number; text_files?: number; calls?: number; resolved?: number; lines?: number; db_bytes?: number; langs?: [string, number][] }
@@ -54,6 +53,13 @@ export const DRIFT_AT = 0.7
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 
 // ── numbers ───────────────────────────────────────────────
+
+/** Session tokens as spent: in = fresh input (uncached + cache writes), out = output. Cache reads are
+ *  re-sent context on every step, so they are left out here and only feed the cache %. */
+export function tokenSplit(t: DeckData['tokens']): { in: number; out: number; total: number } {
+  const i = t.input + t.cacheWrite
+  return { in: i, out: t.output, total: i + t.output }
+}
 
 export function fmtTok(n: number): string {
   if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`
@@ -266,15 +272,16 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   const week = d.limits.find(l => /seven|week|7d/i.test(l.kind))
   if (week) body.push(meter('week', week.percentUsed / 100, w, level(week.percentUsed), [{ t: `${Math.round(week.percentUsed)}%`, b: true }]))
   const tk = d.tokens
-  const total = tk.input + tk.output + tk.cacheRead + tk.cacheWrite
+  const split = tokenSplit(tk)
+  const total = split.total
   const figures: Line = []
   const fig = (label: string, value: string, c?: string) => figures.push(...(figures.length ? [{ t: '   ', d: true }] : []), { t: label + ' ', d: true }, { t: value, c, b: true })
   if (d.cost !== undefined) fig('cost', `$${d.cost.toFixed(2)}`)
-  if (d.cost !== undefined && d.costStartAt && now - d.costStartAt > 3e5) fig('rate', `$${(d.cost / ((now - d.costStartAt) / 3.6e6)).toFixed(1)}/h`)
-  if (total > 0) fig('tokens', fmtTok(total))
   const cacheBase = tk.input + tk.cacheRead + tk.cacheWrite
   if (cacheBase > 0) fig('cache', `${Math.round((100 * tk.cacheRead) / cacheBase)}%`, tk.cacheRead / cacheBase > 0.7 ? 'success' : 'warning')
-  if (figures.length) body.push([], figures)
+  if (figures.length || total > 0) body.push([])
+  if (total > 0) body.push([{ t: 'tokens ', d: true }, { t: fmtTok(total), b: true }, { t: '   in ', d: true }, { t: fmtTok(split.in), b: true }, { t: '   out ', d: true }, { t: fmtTok(split.out), b: true }])
+  if (figures.length) body.push(figures)
   if (body.length) sec('session', '◷ SESSION', 'suggestion', body)
 
   // saved
@@ -436,8 +443,13 @@ export function verdict(c: { seq: string; whole: number; edits: number; tests?: 
 export const FOOTER: Line = [{ t: '/helm:deck task <text>  ·  /helm:deck reset  ·  /helm:prompt', d: true }]
 export const PANE_FRAME_MS = 120
 
-/** Whether the deck opens: an agent session (HELM_AGENT set by /helm:agent) never; otherwise on unless stored off. */
-export function isDeckOn(stored: unknown, agentEnv: string | undefined): boolean {
-  if (typeof agentEnv === 'string' && agentEnv.trim() !== '') return false
+/** Whether the deck opens: on unless stored off for the project. Agent sessions (/helm:agent tabs) follow the same setting. */
+export function isDeckOn(stored: unknown): boolean {
   return stored !== false
+}
+
+/** The goal line of .claude/helm/task.md (`# <goal>`), which anchors an agent session's deck. */
+export function taskGoal(text: string | undefined): string | undefined {
+  const m = /^# (.+)$/m.exec(text ?? '')
+  return m?.[1]?.trim() || undefined
 }

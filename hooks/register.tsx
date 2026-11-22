@@ -1,6 +1,7 @@
 import { deckCleared, deckMeasure, deckOpen, deckPrompt, deckStart, deckStep, deckTool, deckTurnDone, registerDeck } from './deck'
 import type { Register } from 'claude-code'
-import { handleHelmTool, registerHelmTools, toolArgs } from './tools'
+import { nudgeArm, nudgeCheck } from './nudge'
+import { handleHelmTool, registerHelmTools, toolArgs, toolText } from './tools'
 
 /**
  * helm's event wiring. The engine allows one unmatched hook per event per plugin, so the deck's handlers are
@@ -18,13 +19,17 @@ export const register: Register = (on, options) => {
   // /clear fires session.end (reason 'clear') and no session.start after it: the deck is reopened from here.
   on('session.end', async ($, e, next) => {
     const r = await next(e)
-    if (e.reason === 'clear') deckCleared($)
+    if (e.reason === 'clear') {
+      deckCleared($)
+      await nudgeArm($)
+    }
     return r
   }).catch(($, e, next) => next(e))
 
   on('session.start', async ($, e, next) => {
     await deckStart($)
     await registerHelmTools($).catch(() => {})
+    await nudgeArm($)
     const r = await next(e)
     deckOpen($)
     return r
@@ -46,6 +51,8 @@ export const register: Register = (on, options) => {
       const mine = await handleHelmTool($, e.tool, toolArgs(e))
       if (mine !== undefined) return mine as never
     }
+    const hint = nudgeCheck(e)
+    if (hint) return toolText(hint, true)
     const res = await next(e)
     await deckTool($, e, res)
     return res

@@ -1,11 +1,11 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { bar, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, parseWorktrees, terms, topicShift, verdict } from './deck-core'
+import { bar, isDeckOn, taskGoal, deck, drift, driftGauge, layout, len, paceToLimit, parseWorktrees, terms, topicShift, verdict } from './deck-core'
 import type { DeckData } from './deck-core'
 
 const data = (x: Partial<DeckData> = {}): DeckData => ({
   task: 'Add GDScript support to atlas', taskAt: 0, turns: 12, model: 'opus-5-5', effort: 'medium', branch: 'main', dirty: 3,
   ctx: { tokens: 118000, window: 200000, percent: 59 }, limits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: 3 * 3600 }],
-  compactions: 1, cost: 4.8, costStartAt: 0, tokens: { input: 1000, output: 2000, cacheRead: 9000, cacheWrite: 1000 },
+  compactions: 1, cost: 4.8, tokens: { input: 1000, output: 2000, cacheRead: 9000, cacheWrite: 1000 },
   atlas: { files: 24, queries: 14, returned: 1100, avoided: 57000, on: true }, sessionAvoided: 8000, touched: [{ path: 'hooks/deck.tsx', edited: true }, { path: 'hooks/herdr.ts', edited: false }, { path: 'atlas/src/query.rs', edited: false }],
   cur: { seq: 'ffrre', at: 0, tok0: 1000, doing: 'editing', target: 'hooks/deck-core.ts' }, history: [{ n: 11, seq: 'frr', tok: 31000, ms: 60000, result: 'warn', text: '2 whole-file reads' }, { n: 12, seq: 'ffret', tok: 18000, ms: 42000, result: 'ok', text: 'tests passed' }],
   drift: drift(59, 0.5, 12), feed: [{ at: 0, kind: 'find', text: 'find exit', note: 'atlas', tone: 'good' }], running: true, ...x,
@@ -50,6 +50,13 @@ test('deck: every section, fits the width, animates only while running', () => {
   const fresh = text(deck(data({ tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, task: undefined }), 46, 0, now))
   expect(fresh).not.toContain('tokens 0')
   expect(fresh).toContain('your next prompt becomes the task')
+  // tokens: in = input + cache writes, out = output; cache reads only feed the cache %; no $/h rate
+  for (const x of ['tokens 4.0k', 'in 2.0k', 'out 2.0k', 'cost $4.80']) expect(t).toContain(x)
+  expect(t).not.toContain('/h')
+  expect(t).not.toContain('rate ')
+  const big = text(deck(data({ tokens: { input: 1000, output: 2000, cacheRead: 1_400_000, cacheWrite: 1000 } }), 46, 0, now))
+  for (const x of ['tokens 4.0k', 'in 2.0k', 'out 2.0k']) expect(big).toContain(x)
+  expect(big).not.toContain('1.4M')
 })
 
 test('atlas state: stale shows the changed count, fresh the index size', () => {
@@ -119,11 +126,16 @@ test('deck: a fresh session with atlas stats but no touched files yet still draw
   expect(t).toContain('ATLAS')
 })
 
-test('deck on/off: stored off wins, agent sessions never open', () => {
-  expect(isDeckOn(undefined, undefined)).toBe(true)
-  expect(isDeckOn(false, undefined)).toBe(false)
-  expect(isDeckOn(true, 'reviewer')).toBe(false)
-  expect(isDeckOn(true, '')).toBe(true)
+test('deck on/off: on unless stored off, agent sessions included', () => {
+  expect(isDeckOn(undefined)).toBe(true)
+  expect(isDeckOn(true)).toBe(true)
+  expect(isDeckOn(false)).toBe(false)
+})
+
+test('task goal: the heading of .claude/helm/task.md, else nothing', () => {
+  expect(taskGoal('# Ship the deck in agent tabs\n\n<goal>...</goal>\n')).toBe('Ship the deck in agent tabs')
+  expect(taskGoal('<goal>no heading</goal>')).toBe(undefined)
+  expect(taskGoal(undefined)).toBe(undefined)
 })
 
 function stubDeck(on: Parameters<Parameters<typeof test>[1]>[1], stored: Record<string, unknown>, env: Record<string, string> = {}) {
@@ -173,8 +185,14 @@ test('deck tool: off closes and stays off across /clear and a new session; on re
   expect(said(await deckTool($, { action: 'open' }))).toBe('Deck opened.')
 })
 
-test('deck never opens in an agent session started by helm:agent', async ($, on) => {
-  const { opened, clock } = stubDeck(on, {}, { HELM_AGENT: 'reviewer' })
+test('the deck opens in an agent session started by helm:agent, unless turned off for the project', async ($, on) => {
+  const stored: Record<string, unknown> = {}
+  const { opened, clock } = stubDeck(on, stored, { HELM_AGENT: 'reviewer' })
+  await $.session.start({ cwd: '/proj', surface: 'terminal', isInteractive: true })
+  await clock.advance(3000)
+  expect(opened).toContain('helm-deck')
+  opened.length = 0
+  stored['deckOn:/proj'] = false
   await $.session.start({ cwd: '/proj', surface: 'terminal', isInteractive: true })
   await clock.advance(3000)
   expect(opened).toEqual([])
