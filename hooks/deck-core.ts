@@ -96,14 +96,15 @@ export function addCtx(series: number[] | undefined, pct: number | undefined): n
 
 export type FiveSample = { at: number; pct: number }
 
-/** The 5h usage, one sample a minute: a sample within a minute of the last updates its pct and keeps its minute; a moved reset time (a new 5h window) starts the series over, an absent one keeps it. */
+/** The 5h usage, one sample a minute: a sample within a minute of the last updates its pct and keeps its minute; a reset time that moves forward by over 30 min (a new 5h window) starts the series over; jitter, a backward move or an absent one keeps it. */
 /** The 5h chart needs about ten minutes of samples (one a minute); until then the plain meter shows. */
 export const FIVE_CHART_MIN = 10
+const NEW_WINDOW_MS = 30 * 60_000
 
 export function addFive(series: FiveSample[] | undefined, windowAt: number | undefined, pct: number | undefined, resetsAt: string | number | undefined, at: number): { fiveSeries: FiveSample[]; fiveAt?: number } {
   const r = resetMs(resetsAt)
-  const fresh = r !== undefined && (windowAt === undefined || Math.abs(r - windowAt) > 60_000)
-  const fiveAt = fresh ? r : windowAt
+  const fresh = r !== undefined && (windowAt === undefined || r - windowAt > NEW_WINDOW_MS)
+  const fiveAt = r ?? windowAt
   const base = fresh ? [] : (series ?? [])
   if (pct === undefined || !Number.isFinite(pct)) return { fiveSeries: base, fiveAt }
   const last = base.at(-1)
