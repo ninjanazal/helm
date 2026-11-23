@@ -64,7 +64,7 @@ test('deck: every section, fits the width, animates only while running', () => {
   const fresh = text(deck(data({ tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, task: undefined }), 46, 0, now))
   expect(fresh).not.toContain('tokens 0')
   expect(fresh).toContain('your next prompt becomes the task')
-  // tokens: in = input + cache writes, out = output; cache reads only feed the cache %; no $/h rate
+  // tokens: in = input + cache writes, out = output; no $/h rate
   expect(t).toContain('$4.80 · 4.0k tok')
   expect(t).not.toContain('/h')
   expect(t).not.toContain('rate ')
@@ -360,6 +360,10 @@ test('series: 5h per minute, resets with its window', () => {
   for (let i = 0; i < 130; i++) g = addFive(g.fiveSeries, g.fiveAt, i % 100, R, i * 60_000)
   expect(g.fiveSeries.length).toBe(120)
   expect(addFive([{ at: 0, pct: 3 }], R, undefined, R, 120_000).fiveSeries).toEqual([{ at: 0, pct: 3 }])
+  // no reset time: the series is kept (same window), not restarted on every call
+  let k = addFive(undefined, undefined, 1, undefined, 0)
+  for (const t of [60_000, 120_000]) k = addFive(k.fiveSeries, k.fiveAt, 2, undefined, t)
+  expect(k.fiveSeries.length).toBe(3)
 })
 
 test('usage: context trail and 5h braille chart', () => {
@@ -372,6 +376,9 @@ test('usage: context trail and 5h braille chart', () => {
   expect(u.slice(2, 5).every(r => r.length === 46)).toBe(true)
   expect(u.slice(2, 5).some(r => B.test(r))).toBe(true)
   expect(u.length).toBeLessThanOrEqual(8)
+  expect(rows(46, { limits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: 3 * 3600 }, { kind: 'seven_day', percentUsed: 23, resetsAt: 5 * 3600 }] }).length).toBeLessThanOrEqual(8)
+  // exactly 2 context samples already draw a trail
+  expect(rows(46, { ctxSeries: [20, 59] })[0]).toMatch(/[⠁-⣿]/)
   for (const r of u) expect([...r].length).toBeLessThanOrEqual(46)
   expect(u[0]!.match(/59% ⟲( +)[⠁-⣿]/)![1]!.length).toBeLessThanOrEqual(2)
   expect(rows(46, { limits: [{ kind: 'five_hour', percentUsed: 42 }] })[1]).not.toContain('↻')

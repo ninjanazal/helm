@@ -82,10 +82,10 @@ export function addCtx(series: number[] | undefined, pct: number | undefined): n
 
 export type FiveSample = { at: number; pct: number }
 
-/** The 5h usage, one sample a minute (a nearer one replaces the last); a new window (its reset moved) starts the series over. */
+/** The 5h usage, one sample a minute: a sample within a minute of the last updates its pct and keeps its minute; a moved reset time (a new 5h window) starts the series over, an absent one keeps it. */
 export function addFive(series: FiveSample[] | undefined, windowAt: number | undefined, pct: number | undefined, resetsAt: string | number | undefined, at: number): { fiveSeries: FiveSample[]; fiveAt?: number } {
   const r = resetMs(resetsAt)
-  const fresh = windowAt === undefined || (r !== undefined && Math.abs(r - windowAt) > 60_000)
+  const fresh = r !== undefined && (windowAt === undefined || Math.abs(r - windowAt) > 60_000)
   const fiveAt = fresh ? r : windowAt
   const base = fresh ? [] : (series ?? [])
   if (pct === undefined || !Number.isFinite(pct)) return { fiveSeries: base, fiveAt }
@@ -240,7 +240,7 @@ function meter(label: string, p: number, w: number, c: string, value: Line, mark
     const room = w - lw - 4 - 1 - len(value) - 1
     const tr = trail.trimStart()
     const t = room > 0 ? tr.slice(-room) : ''
-    if (t.length >= 2) return [{ t: name.padEnd(lw), d: true }, ...bar(p, w - lw - 1 - len(value) - 1 - t.length, c, mark), { t: ' ' }, ...value, { t: ' ' }, { t: t, c }]
+    if (t.length >= 1) return [{ t: name.padEnd(lw), d: true }, ...bar(p, w - lw - 1 - len(value) - 1 - t.length, c, mark), { t: ' ' }, ...value, { t: ' ' }, { t: t, c }]
   }
   const bw = Math.max(4, w - lw - 1 - vw)
   return [{ t: name.padEnd(lw), d: true }, ...bar(p, bw, c, mark), { t: ' ' }, ...padTo(value, vw)]
