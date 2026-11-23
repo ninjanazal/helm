@@ -108,7 +108,7 @@ cmd_setup() {
     case $p in helm) helm_action;; *) "install_$p";; esac || failed="$failed $p"
   done
   [ -n "$failed" ] && die "${Y}✘${R} failed:$failed (see above)"
-  printf '\n%s✔ Done.%s In Claude Code: %s/reload-plugins%s, then %s/helm:deck%s.\n' "$G" "$R" "$B" "$R" "$B" "$R"
+  printf '\n%s✔ Done.%s In Claude Code: %s/reload-plugins%s, then %s/helm:help%s.\n' "$G" "$R" "$B" "$R" "$B" "$R"
 }
 
 # do_remove: confirm (unless HELM_YES), then uninstall PIECES (default: all helm manages).

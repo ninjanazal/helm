@@ -1,6 +1,8 @@
 import type { EngineInterface } from 'claude-code'
 import { engineIo, setTask } from './task'
-import { deckOpenNow, deckReset, deckSet, deckTask } from './deck'
+import { leanSet } from './lean'
+import { deckCheck, deckChecks, deckOpenNow, deckReset, deckSet, deckTask } from './deck'
+import { parseChecks } from './deck-core'
 
 /**
  * helm's tools. Each /helm:<verb> skill calls one of these and shows its text as is: the tool does the work,
@@ -24,14 +26,27 @@ export async function registerHelmTools($: EngineInterface): Promise<void> {
     name: 'deck',
     description:
       'Controls the helm deck pane. action: open (show it; turns it on), on (turn on for this project and open), ' +
-      'off (turn off for this project and close; stays off across /clear and new sessions), task (re-anchor the task to text), reset.',
+      'off (turn off for this project and close; stays off across /clear and new sessions), task (re-anchor the task to text), reset, ' +
+      'check (mark acceptance item n of the approved prompt todo, working or done, as you verify it).',
     inputSchema: {
       type: 'object',
       required: ['action'],
       properties: {
-        action: { type: 'string', enum: ['open', 'on', 'off', 'task', 'reset'] },
+        action: { type: 'string', enum: ['open', 'on', 'off', 'task', 'reset', 'check'] },
         text: { type: 'string', description: 'For task: the task in one line' },
+        n: { type: 'number', description: 'For check: the acceptance item, from 1' },
+        state: { type: 'string', enum: ['todo', 'working', 'done'], description: 'For check: its new state' },
       },
+    },
+    isDeferred: false,
+  })
+  await $.tool.register({
+    name: 'lean',
+    description: 'Lean mode (fewer output tokens, on by default). action: on, off, lite, full, or status.',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: { action: { type: 'string', enum: ['on', 'off', 'lite', 'full', 'status'] } },
     },
     isDeferred: false,
   })
@@ -64,7 +79,15 @@ export async function handleHelmTool($: EngineInterface, tool: string, args: Rec
       const text = str(args.text)?.trim()
       return text ? toolText(await deckTask($, text)) : toolText('Error: task needs text.', true)
     }
-    return toolText('Error: action is one of open, on, off, task, reset.', true)
+    if (action === 'check') {
+      const r = await deckCheck($, args.n, args.state)
+      return toolText(r.text, r.isError)
+    }
+    return toolText('Error: action is one of open, on, off, task, reset, check.', true)
+  }
+  if (tool === 'mcp__helm__lean') {
+    const a = str(args.action)
+    return toolText(await leanSet($, a === 'on' ? 'full' : a))
   }
   if (tool === 'mcp__helm__set_task') {
     const prompt = str(args.prompt)?.trim()
@@ -73,6 +96,7 @@ export async function handleHelmTool($: EngineInterface, tool: string, args: Rec
     const root = (await $.session.cwd().catch(() => undefined)) ?? '.'
     await setTask(engineIo($), root, prompt, goal)
     await deckTask($, goal)
+    await deckChecks($, parseChecks(prompt))
     return toolText(`Task saved: ${goal}. Say "go" to work on it here.`)
   }
   return undefined

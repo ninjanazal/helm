@@ -67,6 +67,34 @@ Fix it, don't just flag it, if any of these is true:
 - It contains persona text ("You are a senior…"), urgency or flattery. These add nothing.
 - It repeats itself, or holds generic advice that would fit any task.
 
+## 4b. Offer to split the work (only when it fits)
+Once the prompt passes step 4, and before showing it, judge whether the task is big enough to split. It is when
+**all** hold: it breaks into 3+ units that touch disjoint files, each unit has its own deterministic check, and
+no unit needs a design decision from another. Small, tightly coupled or judgement-heavy work is not split:
+skip this step silently, don't ask.
+
+If it fits, ask in one `AskUserQuestion` (recommended option first):
+"This is big enough to hand to cheaper-model sub agents. Split it?"
+- **Split (Recommended)**: the host stays the planner and reviewer; sub agents on a cheaper model (Haiku or
+  Sonnet) do the units.
+- **Keep it as one task**: one agent does everything.
+
+On split, add this block after `<acceptance>`, one entry per unit, and keep the whole-task checks there:
+```xml
+<split>
+  Host: plans, hands out units, reviews every result against its check, runs the whole-task acceptance.
+  - unit 1 [model: haiku|sonnet]: what to do · scope (files) · check (command) · depends on: none
+  - unit 2 ...
+  Rules: units never share a file; give each sub agent only its unit, scope and check; a unit that fails its
+  check twice comes back to the host, not retried blindly; independent units run in parallel.
+  Lean: start every unit brief with "Lean: answer first, no recap, smallest complete change, keep checks and
+  exact code, one line on anything skipped." (sub agents don't inherit the host's system prompt). Leave it out
+  only if the person turned lean off (`/helm:lean off`).
+</split>
+```
+Pick Haiku for mechanical edits (rename, move, boilerplate, tests from a spec) and Sonnet for units that need
+reading and judging code. If the person declines, write nothing and don't ask again.
+
 ## 5. Get it approved
 Show the prompt in one fenced block, then one line: "Approve it, edit it, or change the scope?"
 - If they edit: apply the edits, re-check step 4, and show it again.
@@ -76,4 +104,8 @@ Show the prompt in one fenced block, then one line: "Approve it, edit it, or cha
 On approval call `mcp__helm__set_task` with `{ "prompt": "<the approved prompt, whole>", "goal": "<the goal in one line>" }`.
 Then stop and say, in one line, that it is saved and that "go" starts it here: if superpowers is installed,
 brainstorming then writing-plans first (otherwise straight from the prompt, as the contract), finishing with
-the `<output>` report checked against `<acceptance>`.
+the `<output>` report checked against `<acceptance>`. If the prompt has a `<split>`, "go" dispatches its units
+to sub agents (parallel where independent) instead of doing them in the host.
+The deck shows the `<acceptance>` items as checks: while working on "go", call `mcp__helm__deck` with
+`{ "action": "check", "n": <item, from 1>, "state": "working" }` when you start verifying an item and
+`"state": "done"` once its check passes, so the deck shows progress toward done.

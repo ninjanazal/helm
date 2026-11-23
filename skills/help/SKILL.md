@@ -11,10 +11,9 @@ If no `superpowers:*` skills are in your skill list, add one line after it: "sup
 ## Commands
 | Command | What it does |
 | --- | --- |
-| `/helm:prompt <request>` | Start a task: re-anchors the deck, builds a complete prompt (goal, context, scope, acceptance checks, stop conditions), and once you approve it saves it as the current task. Then say "go" to work on it here. |
-| `/helm:deck` | Open the deck pane. |
-| `/helm:deck on` / `off` | Turn the deck on or off for this project. Off stays off across `/clear` and new sessions. |
-| `/helm:deck task <text>` / `reset` | Re-anchor the task (resets drift) / clear the deck. |
+| `/helm:switch [on \| off]` | Turn helm on or off for this project: the deck pane and lean mode. Off stays off across `/clear` and new sessions. |
+| `/helm:prompt <request>` | The one to work with: give it a task. It re-anchors the deck, builds a complete prompt (goal, context, scope, acceptance checks, stop conditions, optional split to cheaper sub agents), and once you approve it saves it as the current task. Say "go" to run it. |
+| `/helm:lean [on \| off \| lite \| full]` | Lean mode: the model answers first, skips recaps and writes the smallest complete change, never at the cost of checks or exact code. On by default; `off` (or "stop lean") turns it off; applies from the next session, `/clear` or compaction. A project can pin it in `.claude/helm/lean`. |
 | `/helm:commit [--dry]` | Commit the staged changes: `type(scope): subject`, bulleted body, no attribution lines. `--dry` only shows the message. |
 | `/helm:help` | This guide. |
 

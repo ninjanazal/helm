@@ -35,5 +35,6 @@ CLAUDE=$T/claude RESULTS=$T/r.jsonl TASKS=fix-truncate RUNS=2 sh "$B/run.sh" >/d
 [ "$(wc -l < "$T/r.jsonl")" -eq 4 ] && [ "$(jq -s 'map(select(.pass == false)) | length' "$T/r.jsonl")" -eq 4 ] && ok 'runner: 4 rows (stub changes nothing, so every check fails)' || bad 'runner: 4 rows'
 [ "$(grep -c -- '--plugin-dir' "$T/calls")" -eq 2 ] && [ "$(grep -vc -- '--plugin-dir' "$T/calls")" -eq 2 ] && ok 'runner: --plugin-dir only in the helm arm' || bad 'runner: --plugin-dir only in the helm arm'
 jq -e -s 'all(.[]; has("date","sha","model","task","arm","run","pass","input_tokens","output_tokens","cost_usd","duration_ms","turns"))' "$T/r.jsonl" >/dev/null && ok 'runner: rows have every column' || bad 'runner: rows have every column'
+ARMS='helm helm-nolean baseline' DRY=1 TASKS=fix-truncate RUNS=1 sh "$B/run.sh" 2>&1 | grep -q 'helm-nolean' && ok 'ARMS adds the helm-nolean arm' || bad 'ARMS adds the helm-nolean arm'
 sh "$B/report.sh" "$B/results.sample.jsonl" | grep -q '| TOTAL |' && ok 'report prints the table from the sample' || bad 'report prints the table from the sample'
 [ $fails -eq 0 ]

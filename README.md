@@ -4,8 +4,9 @@
 
 helm is a Claude Code plugin:
 
-- **Deck pane:** the session's health beside the chat. It shows the task, a drift meter (time for a fresh session?), context and 5h limit bars with the pace to the limit, tokens, cost, cache hits, the files this session touched, and a live feed of tool calls. It animates only while a turn runs.
+- **Deck pane:** the session's health beside the chat. A header with the task, time, turns, model, effort, lean level and branch; a focus meter (drift: time for a fresh session?); usage: a context meter with a braille trail of recent turns, a braille chart of the 5h limit with its reset countdown, a weekly meter, and cost and tokens; a row per sub agent with its own tokens and clock; and the approved `/helm:prompt`'s acceptance checks, which Claude ticks as it verifies them. Colours follow your theme, light or dark. It animates only while a turn runs.
 - **`/helm:prompt`:** turns a rough request into a complete, checkable prompt (goal, grounded context, scope, acceptance checks, stop conditions) and saves it as the current task once approved.
+- **Lean mode:** on by default, a short system-prompt section that cuts output tokens. `/helm:lean off` turns it off. Ideas from ponytail and caveman, written natively.
 - **superpowers** (workflow skills) is installed with helm as a plugin dependency; helm's prompt and commit skills route to it and work without it.
 
 ## 📦 Install
@@ -16,7 +17,7 @@ make remove    # asks the same, confirms, then uninstalls
 make status    # what is installed, and where
 ```
 
-Then run `/reload-plugins` and `/helm:deck` in Claude Code.
+Then run `/reload-plugins` and `/helm:help` in Claude Code.
 
 From GitHub, without cloning: `/plugin install helm --marketplace ninjanazal/helm`.
 
@@ -34,7 +35,7 @@ rm -rf .claude/helm/tasks .claude/helm/team.json
 
 ## 🧭 Deck
 
-- `/helm:deck` opens the pane; `/helm:deck on|off` turns it on or off for the project (off survives `/clear` and new sessions); `/helm:deck task <text>` re-anchors the task (and resets drift); `/helm:deck reset` clears it.
+- `/helm:switch` opens the pane; `/helm:switch on|off` turns helm (the deck and lean mode) on or off for the project; off survives `/clear` and new sessions. Each approved `/helm:prompt` re-anchors the task and resets drift.
 - Drift = 0.4 × context fill + 0.4 × topic shift (new terms vs. the task's first prompt) + 0.2 × turns/60. At 0.70 it suggests a fresh session.
 - Every number comes from the engine or git; cost is the engine's own estimate.
 
@@ -42,8 +43,9 @@ rm -rf .claude/helm/tasks .claude/helm/team.json
 
 | Command | What it does |
 | --- | --- |
-| `/helm:prompt <request>` | Start a task: builds a complete prompt, saves it as the current task once you approve |
-| `/helm:deck [on \| off \| task <text> \| reset]` | The deck pane |
+| `/helm:switch [on \| off]` | Turn helm on or off for this project (deck pane and lean mode) |
+| `/helm:prompt <request>` | The one to work with: give it a task, it builds a complete prompt, and once you approve, "go" runs the pipeline (brainstorming, plans, split to cheaper sub agents) |
+| `/helm:lean [on \| off \| lite \| full]` | Lean mode, on by default: fewer output tokens (answer first, no recap, smallest complete change) without dropping checks. Pin per project with `.claude/helm/lean` |
 | `/helm:commit [--dry]` | Commit the staged changes: Conventional Commits subject, bulleted body, no attribution lines |
 | `/helm:help` | The full guide |
 
@@ -57,6 +59,7 @@ make bench TASKS=fix-truncate RUNS=1    # one task, one run per arm
 make bench DRY=1                        # list task x arm x run, call nothing, spend nothing
 make bench REPORT=1                     # only print the table from bench/results.jsonl
 make bench MODEL=haiku EFFORT=low       # defaults: sonnet, medium
+make bench ARMS='helm helm-nolean'      # lean A/B: helm vs helm with lean pinned off; then ARM=helm VS=helm-nolean make bench REPORT=1
 sh bench/test.sh                        # free self-test: every check fails on the fixture and passes with its solution.patch
 ```
 

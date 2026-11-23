@@ -1,8 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import { DRIFT_AT, PANE_FRAME_MS, deck, drift, isDeckOn, layout, terms, tokenSplit, topicShift, verdict } from './deck-core'
-import type { DeckData, FeedItem } from './deck-core'
-import type { DeckDone, DeckState } from '../types'
+import { DRIFT_AT, PANE_FRAME_MS, addCtx, addFive, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, layout, terms, tokenSplit, topicShift, verdict } from './deck-core'
+import type { DeckData, FeedItem, StepUsage } from './deck-core'
+import type { DeckCheck, DeckDone, DeckState } from '../types'
+import { readLevel } from './lean'
 
 /**
  * The deck pane: the session's health beside the chat. Every figure comes from the engine (session.measure,
@@ -12,13 +13,15 @@ import type { DeckDone, DeckState } from '../types'
 
 const PANE = 'helm-deck'
 const blank = (): DeckState => ({ turns: 0, compactions: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, feed: [], recent: [], taskTerms: [] })
-const state = atom({ plugin: 'helm', key: 'deck' } as const, blank(), { shape: 'deck-1' })
+const state_ = atom({ plugin: 'helm', key: 'deck' } as const, blank(), { shape: 'deck-1' })
 const frame = atom({ plugin: 'helm', key: 'deckFrame' } as const, 0)
 
 let running = false
 let tickGen = 0
-/** Off (/helm:deck off): no auto-open, no reopen after /clear, no polling. */
+/** Off (/helm:switch off): no auto-open, no reopen after /clear, no polling. */
 let deckIsOn = true
+/** helm as a whole is on: lean mode follows the deck's switch. */
+export const helmIsOn = () => deckIsOn
 let deckKey: string | undefined
 
 /** Per-project store key for the on/off choice, pinned to the launch directory. */
@@ -28,7 +31,7 @@ async function onKey($: EngineInterface): Promise<string> {
 }
 
 function set($: EngineInterface, fn: (s: DeckState) => DeckState) {
-  return update($, state, fn)
+  return update($, state_, fn)
 }
 const quiet = async (fn: () => Promise<unknown>) => { try { await fn() } catch { /* display only */ } }
 
@@ -46,6 +49,10 @@ async function poll($: EngineInterface) {
     await set($, s => ({ ...s, ctx: u.context, limits: (u.rateLimits ?? []).map(r => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt })), cost: u.cost?.usd, startedAt: u.startedAt }))
   })
   await quiet(async () => {
+    const lean = await readLevel($)
+    await set($, s => (s.lean === lean ? s : { ...s, lean }))
+  })
+  await quiet(async () => {
     const r = await $.process.run(['git', 'status', '--porcelain', '-b'], opts)
     if (r.exitCode !== 0) return
     const lines = String(r.stdout).split('\n').filter(Boolean)
@@ -54,8 +61,10 @@ async function poll($: EngineInterface) {
   })
 }
 
+const ctxPct = (s: DeckState) => s.ctx?.percent ?? (s.ctx?.tokens ? (100 * s.ctx.tokens) / s.ctx.window : 0)
+
 function view(s: DeckState): DeckData {
-  const pct = s.ctx?.percent ?? (s.ctx?.tokens ? (100 * s.ctx.tokens) / s.ctx.window : 0)
+  const pct = ctxPct(s)
   const recent = new Set(s.recent.flat())
   return {
     ...s,
@@ -71,7 +80,7 @@ export const registerDeck: Register = on => {
     if (!(e as { agentId?: string }).agentId) {
       running = true
       const now = await $.clock.now()
-      await quiet(() => set($, s => ({ ...s, curDone: false, cur: { seq: '', at: now, tok0: totalTok(s), whole: 0, edits: 0 } })))
+      await quiet(() => set($, s => ({ ...s, curDone: false, ask: undefined, cur: { ask: s.ask, cost0: s.cost, seq: '', at: now, tok0: totalTok(s), whole: 0, edits: 0 } })))
     }
     return next(e)
   })
@@ -91,7 +100,7 @@ export const registerDeck: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
-    const s = await read($, state)
+    const s = await read($, state_)
     const f = await read($, frame)
     const cols = e.props.bodyColumns
     const w = Math.max(24, cols - 2)
@@ -100,7 +109,7 @@ export const registerDeck: Register = on => {
       <Box flexDirection="column" width={cols} paddingX={1}>
         {lines.map((l, i) => (
           <Text key={`d${i}`} wrap="truncate-end">
-            {l.length ? l.map((x, j) => <Text key={`d${i}s${j}`} color={x.c} weight={x.b ? 'bold' : undefined} dimColor={x.d} inverse={x.inv}>{x.t}</Text>) : ' '}
+            {l.length ? l.map((x, j) => <Text key={`d${i}s${j}`} color={x.c} weight={x.b ? 'bold' : undefined} dimColor={x.d} >{x.t}</Text>) : ' '}
           </Text>
         ))}
       </Box>
@@ -153,7 +162,11 @@ export function deckCleared($: EngineInterface) {
 export async function deckPrompt($: EngineInterface, e: { text: string; isMeta?: true; command?: unknown }) {
   if (reopenPending) deckOpen($)
   await quiet(async () => {
-    if (e.isMeta || e.command || e.text.trim().startsWith('/')) return
+    if (e.isMeta) return
+    // the next turn's receipt names what was asked: the first line, commands included
+    const ask = e.text.trim().split('\n')[0]!.replace(/\s+/g, ' ').slice(0, 60)
+    await set($, s => ({ ...s, ask }))
+    if (e.command || e.text.trim().startsWith('/')) return
     const now = await $.clock.now()
     const t = [...terms(e.text)]
     await set($, s => {
@@ -170,37 +183,49 @@ export async function deckPrompt($: EngineInterface, e: { text: string; isMeta?:
 const totalTok = (s: DeckState) => tokenSplit(s.tokens).total
 
 export async function deckTurnDone($: EngineInterface, e: { agentId?: string }) {
-  if (e.agentId) return
+  if (e.agentId) {
+    const at = await $.clock.now()
+    await quiet(() => set($, s => ({ ...s, agents: agentDone(s.agents ?? [], e.agentId!, at) })))
+    return
+  }
   running = false
   const now = await $.clock.now()
+  // the cost now, so the turn's share is its own (the 5s poll may lag)
+  const cost = await $.session.usage().then(u => u.cost?.usd).catch(() => undefined)
   await quiet(() => set($, s => {
     const n = s.turns + 1
-    if (!s.cur) return { ...s, turns: n }
-    const done: DeckDone = { n, seq: s.cur.seq, tok: totalTok(s) - s.cur.tok0, ms: now - s.cur.at, ...verdict(s.cur) }
-    return { ...s, turns: n, curDone: true, history: [...(s.history ?? []), done].slice(-8) }
+    if (!s.cur) return { ...s, turns: n, cost: cost ?? s.cost, ctxSeries: addCtx(s.ctxSeries, s.ctx ? ctxPct(s) : undefined) }
+    const spent = cost !== undefined && s.cur.cost0 !== undefined ? Math.max(0, cost - s.cur.cost0) : undefined
+    const done: DeckDone = { n, seq: s.cur.seq, tok: totalTok(s) - s.cur.tok0, ms: now - s.cur.at, ...verdict(s.cur), ask: s.cur.ask, cost: spent }
+    return { ...s, turns: n, cost: cost ?? s.cost, curDone: true, history: [...(s.history ?? []), done].slice(-8), ctxSeries: addCtx(s.ctxSeries, s.ctx ? ctxPct(s) : undefined) }
   }))
   await quiet(() => update($, frame, f => f + 1))
 }
 
-type Usage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
-export async function deckStep($: EngineInterface, e: { agentId?: string; model: string; effort?: unknown }, u: Usage | undefined) {
-  if (e.agentId) return
-  await quiet(() => set($, s => ({
-    ...s,
-    model: e.model.replace(/^claude-/, '').replace(/-\d{8}$/, ''),
-    effort: e.effort === undefined ? s.effort : String(e.effort),
-    tokens: u ? {
-      input: s.tokens.input + u.input_tokens,
-      output: s.tokens.output + u.output_tokens,
-      cacheRead: s.tokens.cacheRead + u.cache_read_input_tokens,
-      cacheWrite: s.tokens.cacheWrite + u.cache_creation_input_tokens,
-    } : s.tokens,
-  })))
+/** A sub agent's step: counted on its own card, never in the main-session totals (see applyStep). */
+async function agentStep($: EngineInterface, e: { agentId?: string; model: string }, u: StepUsage | undefined) {
+  const now = await $.clock.now()
+  // ask the engine for its task until the card has one (the list may not hold a just-spawned agent yet)
+  const known = ((await read($, state_)).agents ?? []).some(a => a.id === e.agentId && a.task)
+  const info = known ? undefined : await $.agent.list().then(l => l.find(a => a.id === e.agentId)).catch(() => undefined)
+  await set($, s => applyStep(s, e, u, now, info && { task: info.description, type: info.type }))
+}
+
+export async function deckStep($: EngineInterface, e: { agentId?: string; model: string; effort?: unknown }, u: StepUsage | undefined) {
+  if (e.agentId) return quiet(() => agentStep($, e, u))
+  await quiet(async () => {
+    const now = await $.clock.now()
+    await set($, s => applyStep(s, e, u, now))
+  })
 }
 
 export async function deckMeasure($: EngineInterface, e: { context: DeckState['ctx']; rateLimits?: unknown }) {
   const rl = Array.isArray(e.rateLimits) ? (e.rateLimits as { kind: string; percentUsed: number; resetsAt?: string }[]) : []
-  await quiet(() => set($, s => ({ ...s, ctx: e.context, limits: rl.map(r => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt })) })))
+  const at = await $.clock.now()
+  await quiet(() => set($, s => {
+    const l = rl.find(r => /five|5h/i.test(r.kind))
+    return { ...s, ctx: e.context, limits: rl.map(r => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt })), ...addFive(s.fiveSeries, s.fiveAt, l?.percentUsed, l?.resetsAt, at) }
+  }))
 }
 
 export async function deckTool($: EngineInterface, e: { tool: string; agentId?: string }, r: unknown) {
@@ -227,6 +252,8 @@ export async function deckTool($: EngineInterface, e: { tool: string; agentId?: 
         await set($, s => ({ ...s, tests: { ok: !err, text: m, at: now } }))
         f = { kind: 'test', text: m, note: err ? 'failed' : 'passed', tone: err ? 'bad' : 'good' }
       } else f = { kind: 'run', text: cmd.split('\n')[0]!.slice(0, 40), note: err ? 'exit≠0' : undefined, tone: err ? 'bad' : undefined }
+    } else if (tool === 'TodoWrite' || tool === 'TaskCreate' || tool === 'TaskUpdate') {
+      if (!err) await set($, s => ({ ...s, todos: applyTodo(s.todos ?? [], tool, input, JSON.stringify(r)) }))
     } else if (tool === 'Agent' || tool === 'Task') {
       f = { kind: 'note', text: `agent: ${String(input.description ?? '')}`.slice(0, 40) }
     }
@@ -294,12 +321,28 @@ export async function deckOpenNow($: EngineInterface): Promise<string> {
 /** Re-anchors the task: drift and turn counts start again from it. */
 export async function deckTask($: EngineInterface, text: string): Promise<string> {
   const now = await $.clock.now()
-  await set($, s => ({ ...s, task: text.slice(0, 80), taskAt: now, taskTerms: [...terms(text)], recent: [], turns: 0 }))
+  await set($, s => ({ ...s, task: text.slice(0, 80), taskAt: now, taskTerms: [...terms(text)], recent: [], turns: 0, checks: undefined }))
   return `Deck task set: ${text}`
 }
 
+/** Loads the approved prompt's acceptance items as the deck's checks (set_task calls it after deckTask). */
+export async function deckChecks($: EngineInterface, checks: DeckCheck[]): Promise<void> {
+  await set($, s => ({ ...s, checks: checks.length ? checks : undefined }))
+}
+
+/** Marks check `n` (1-based) todo, working or done. Answers what changed, or an error for a bad n or state. */
+export async function deckCheck($: EngineInterface, n: unknown, state: unknown): Promise<{ text: string; isError?: true }> {
+  const list = (await read($, state_)).checks ?? []
+  if (!list.length) return { text: 'Error: no checks: approve a /helm:prompt first.', isError: true }
+  if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > list.length) return { text: `Error: n is a check number from 1 to ${list.length}.`, isError: true }
+  if (state !== 'todo' && state !== 'working' && state !== 'done') return { text: 'Error: state is todo, working or done.', isError: true }
+  const next = list.map((c, i) => (i === n - 1 ? { ...c, state } : state === 'working' && c.state === 'working' ? { ...c, state: 'todo' as const } : c))
+  await set($, s => ({ ...s, checks: next }))
+  return { text: `Check ${n} ${state} (${next.filter(c => c.state === 'done').length}/${next.length}).` }
+}
+
 export async function deckReset($: EngineInterface): Promise<string> {
-  await set($, s => ({ ...blank(), ctx: s.ctx, limits: s.limits, cost: s.cost, startedAt: s.startedAt }))
+  await set($, s => ({ ...blank(), ctx: s.ctx, limits: s.limits, fiveSeries: s.fiveSeries, fiveAt: s.fiveAt, cost: s.cost, startedAt: s.startedAt }))
   return 'Deck reset.'
 }
 

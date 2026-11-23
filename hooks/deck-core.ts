@@ -1,10 +1,12 @@
 /**
- * Deck: pure parts (no `$`), so they are unit-tested. The deck is a list of sections; the pane draws each as a
- * native rounded Box (clean in the terminal and the desktop app) with an inverse title chip. While a turn runs a
- * highlight walks from box to box, the spinner turns and a light sweeps the live rule; idle, nothing moves.
+ * Deck: pure parts (no `$`), so they are unit-tested. The deck is a list of sections (header, focus, usage,
+ * agents, checks) drawn open: a coloured title and a rule, no boxes. Colours are theme names only. While a turn
+ * runs the spinner turns and a light sweeps the rule of the sections where work flows; idle, nothing moves.
  */
 
-export type Seg = { t: string; c?: string; b?: boolean; d?: boolean; inv?: boolean }
+import type { DeckAgent, DeckCheck, DeckTodo } from '../types'
+
+export type Seg = { t: string; c?: string; b?: boolean; d?: boolean }
 export type Line = Seg[]
 
 export type FeedItem = { at: number; kind: 'find' | 'read' | 'edit' | 'run' | 'test' | 'topic' | 'note'; text: string; note?: string; tone?: 'good' | 'bad' | 'warn' | 'dim' }
@@ -15,6 +17,8 @@ export type DeckData = {
   turns: number
   model?: string
   effort?: string
+  /** helm's lean level, as stored (it applies from the next session or /clear). */
+  lean?: 'off' | 'lite' | 'full'
   branch?: string
   dirty?: number
   tests?: { ok: boolean; text: string; at: number }
@@ -26,7 +30,14 @@ export type DeckData = {
   day?: number
   touched?: { path: string; edited: boolean }[]
   cur?: { seq: string; at: number; tok0: number; doing?: string; target?: string }
-  history?: { n: number; seq: string; tok: number; ms: number; result: 'ok' | 'warn' | 'err' | 'none'; text: string }[]
+  history?: { n: number; seq: string; tok: number; ms: number; result: 'ok' | 'warn' | 'err' | 'none'; text: string; ask?: string; cost?: number }[]
+  agents?: DeckAgent[]
+  checks?: DeckCheck[]
+  todos?: DeckTodo[]
+  ctxSeries?: number[]
+  fiveSeries?: FiveSample[]
+  /** The current 5h window's reset time, ms. */
+  fiveAt?: number
   drift: Drift
   feed: FeedItem[]
   running: boolean
@@ -61,6 +72,28 @@ function resetMs(r: string | number | undefined): number | undefined {
   if (r === undefined) return undefined
   const v = typeof r === 'number' ? (r < 1e12 ? r * 1000 : r) : Date.parse(r)
   return Number.isFinite(v) ? v : undefined
+}
+
+export const SERIES_CAP = 120
+
+/** The context % after each turn, newest last, at most SERIES_CAP; a non-finite pct adds nothing. */
+export function addCtx(series: number[] | undefined, pct: number | undefined): number[] {
+  const s = series ?? []
+  return pct === undefined || !Number.isFinite(pct) ? s : [...s, pct].slice(-SERIES_CAP)
+}
+
+export type FiveSample = { at: number; pct: number }
+
+/** The 5h usage, one sample a minute: a sample within a minute of the last updates its pct and keeps its minute; a moved reset time (a new 5h window) starts the series over, an absent one keeps it. */
+export function addFive(series: FiveSample[] | undefined, windowAt: number | undefined, pct: number | undefined, resetsAt: string | number | undefined, at: number): { fiveSeries: FiveSample[]; fiveAt?: number } {
+  const r = resetMs(resetsAt)
+  const fresh = r !== undefined && (windowAt === undefined || Math.abs(r - windowAt) > 60_000)
+  const fiveAt = fresh ? r : windowAt
+  const base = fresh ? [] : (series ?? [])
+  if (pct === undefined || !Number.isFinite(pct)) return { fiveSeries: base, fiveAt }
+  const last = base.at(-1)
+  const next = last && at - last.at < 60_000 ? [...base.slice(0, -1), { at: last.at, pct }] : [...base, { at, pct }]
+  return { fiveSeries: next.slice(-SERIES_CAP), fiveAt }
 }
 
 /** At the pace since `since`, when the window would hit 100%, or undefined if that is after its reset. */
@@ -135,6 +168,32 @@ export function bar(p: number, w: number, c: string, mark?: number): Line {
   return merge(out)
 }
 
+const BRAILLE = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]]
+
+/** A braille line chart, `h` rows of `w` cells, top row first: the newest of `values` at the right edge, scaled 0..max. */
+export function brailleLine(values: number[], w: number, h: number, max = 100): string[] {
+  const pw = w * 2, ph = h * 4
+  const bits = new Array<number>(w * h).fill(0)
+  const set = (x: number, y: number) => {
+    x = Math.round(x)
+    y = Math.round(y)
+    if (x < 0 || y < 0 || x >= pw || y >= ph) return
+    bits[(y >> 2) * w + (x >> 1)] |= BRAILLE[x & 1][y & 3]
+  }
+  const yOf = (p: number) => ph - 1 - Math.round((Math.min(max, Math.max(0, p)) / max) * (ph - 1))
+  const v = values.slice(-pw)
+  const x0 = pw - v.length
+  v.forEach((p, i) => {
+    const y = yOf(p)
+    if (!i) return set(x0, y)
+    const px = x0 + i - 1, py = yOf(v[i - 1])
+    const n = Math.max(1, Math.abs(y - py))
+    for (let k = 0; k <= n; k++) set(px + k / n, py + ((y - py) * k) / n)
+  })
+  return Array.from({ length: h }, (_, r) =>
+    Array.from({ length: w }, (_, c) => (bits[r * w + c] ? String.fromCharCode(0x2800 + bits[r * w + c]) : ' ')).join(''))
+}
+
 function merge(l: Line): Line {
   const out: Line = []
   for (const s of l) {
@@ -145,186 +204,280 @@ function merge(l: Line): Line {
   return out
 }
 
-const level = (p: number) => (p >= 90 ? 'error' : p >= 70 ? 'warning' : 'suggestion')
+const level = (p: number) => (p >= 90 ? 'error' : p >= 70 ? 'warning' : 'success')
 
-/** A light sweeping along a rule while running; a plain dim rule when idle. */
+/** A light sweeping along a rule while running; a plain thin rule in the subtle colour when idle. */
 export function rule(w: number, phase: number | undefined): Line {
   const pos = phase === undefined ? -9 : phase % (w + 6)
   const out: Line = []
-  for (let i = 0; i < w; i++) out.push(Math.abs(i - pos) < 3 ? { t: '━', c: 'claude', b: true } : { t: '─', d: true })
+  for (let i = 0; i < w; i++) out.push(Math.abs(i - pos) < 3 ? { t: '━', c: 'claude', b: true } : { t: '─', c: 'subtle' })
   return merge(out)
 }
 
-export type Section = { id: string; title: string; tone: string; body: Line[]; lit: boolean }
+/** A section: `title` is drawn in the section's tone, `meta` (counts) dim after it. */
+export type Section = { id: string; title: string; meta?: string; tone: string; body: Line[]; live: boolean }
 
 /** Label column + bar + value, all rows aligned. */
 const DRIFT_WARN = 0.5
 const zone = (p: number) => (p >= DRIFT_AT ? 'error' : p >= DRIFT_WARN ? 'warning' : 'success')
 export const driftWord = (p: number) => (p >= DRIFT_AT ? 'start fresh' : p >= DRIFT_WARN ? 'drifting' : 'on task')
 
-/**
- * The drift gauge: filled cells take the colour of the zone they sit in (green, then amber from 0.50, red from
- * 0.70), so the bar shows how far into each zone it is; a word says what that means, a scale marks the zones.
- */
+/** The drift gauge: one row, the bar filled in the colour of its zone, and a word for the zone after it. */
 export function driftGauge(p: number, w: number): Line[] {
-  const VW = 17
-  const bw = Math.max(10, w - 9 - VW)
-  const full = Math.round(Math.max(0, Math.min(1, p)) * bw)
-  const cells: Line = [{ t: 'focus'.padEnd(8), d: true }]
-  for (let i = 0; i < bw; i++) cells.push(i < full ? { t: '▆', c: zone((i + 0.5) / bw) } : { t: '▆', c: 'subtle' })
-  cells.push({ t: ' ' }, ...padTo([{ t: p.toFixed(2), c: zone(p), b: true }, { t: ' ' + driftWord(p), c: zone(p) }], VW))
-  const scale = Array<string>(bw).fill(' ')
-  const put = (at: number, txt: string) => [...txt].forEach((ch, k) => { const x = Math.round(at * bw) + k; if (x < bw) scale[x] = ch })
-  put(0, 'on task')
-  put(DRIFT_WARN, '│drifting')
-  put(DRIFT_AT, '│fresh')
-  const sc: Line = [{ t: ' '.repeat(8) }]
-  scale.forEach((ch, i) => sc.push({ t: ch, c: zone(i / bw), d: ch === '│' }))
-  return [merge(cells), merge(sc)]
+  const narrow = w < 40
+  const word = narrow ? (p >= DRIFT_AT ? 'fresh' : p >= DRIFT_WARN ? 'drift' : 'ok') : driftWord(p)
+  return [meter('focus', p, w, zone(p), [{ t: word, c: zone(p), b: true }])]
 }
 
-/** Every meter has the same bar length: a fixed value column of VALUE_W, so bars start and end together. */
+/** Meters share one bar length: a fixed value column, so bars start and end together. Narrow panes shrink both columns. */
 const VALUE_W = 14
-function meter(label: string, p: number, w: number, c: string, value: Line, mark?: number): Line {
-  return [{ t: label.padEnd(8), d: true }, ...bar(p, Math.max(6, w - 8 - 1 - VALUE_W), c, mark), { t: ' ' }, ...padTo(value, VALUE_W)]
+const SHORT: Record<string, string> = { context: 'ctx', week: 'wk' }
+function meter(label: string, p: number, w: number, c: string, value: Line, mark?: number, trail?: string): Line {
+  const narrow = w < 40
+  const lw = narrow ? 5 : 8
+  const vw = narrow ? 11 : VALUE_W
+  const name = narrow ? (SHORT[label] ?? label).slice(0, lw - 1) : label
+  if (trail) {
+    // value unpadded, the trail right beside it; the bar takes the slack but keeps 4 cells, so the trail is capped to fit
+    const room = w - lw - 4 - 1 - len(value) - 1
+    const tr = trail.trimStart()
+    const t = room > 0 ? tr.slice(-room) : ''
+    if (t.length >= 1) return [{ t: name.padEnd(lw), d: true }, ...bar(p, w - lw - 1 - len(value) - 1 - t.length, c, mark), { t: ' ' }, ...value, { t: ' ' }, { t: t, c }]
+  }
+  const bw = Math.max(4, w - lw - 1 - vw)
+  return [{ t: name.padEnd(lw), d: true }, ...bar(p, bw, c, mark), { t: ' ' }, ...padTo(value, vw)]
 }
 
-/** The deck as sections. `w` is the text width inside a box. */
+/**
+ * Claude's task list after one task-tool call: TodoWrite replaces it; TaskCreate adds an item (its id from the
+ * result, else the next number); TaskUpdate changes one by id (deleted removes it).
+ */
+export function applyTodo(list: DeckTodo[], tool: string, input: Record<string, unknown>, result: string): DeckTodo[] {
+  const st = (s: unknown): DeckTodo['state'] | undefined => (s === 'completed' ? 'done' : s === 'in_progress' ? 'working' : s === 'pending' ? 'todo' : undefined)
+  if (tool === 'TodoWrite' && Array.isArray(input.todos)) {
+    return (input.todos as Record<string, unknown>[]).map(t => ({ text: String(t.content ?? ''), state: st(t.status) ?? 'todo' })).filter(t => t.text)
+  }
+  if (tool === 'TaskCreate' && typeof input.subject === 'string') {
+    const id = /#\s*(\d+)|\btask\s+(\d+)/i.exec(result)
+    return [...list, { id: id ? (id[1] ?? id[2])! : String(list.length + 1), text: input.subject, state: 'todo' }]
+  }
+  if (tool === 'TaskUpdate' && input.taskId !== undefined) {
+    const id = String(input.taskId)
+    if (input.status === 'deleted') return list.filter(t => t.id !== id)
+    return list.map(t => (t.id === id ? { ...t, state: st(input.status) ?? t.state, text: typeof input.subject === 'string' ? input.subject : t.text } : t))
+  }
+  return list
+}
+
+const clock = (ms: number) => (ms < 60000 ? `${Math.max(0, Math.round(ms / 1000))}s` : fmtDur(ms))
+const dot: Seg = { t: ' · ', d: true }
+
+/** Pack items onto rows no wider than `w`, joined by a dim dot, so nothing is cut mid-item while a row has room. */
+function flow(items: Line[], w: number): Line[] {
+  const rows: Line[] = []
+  let cur: Line = []
+  for (const it of items) {
+    if (!it.length) continue
+    if (cur.length && len(cur) + 3 + len(it) > w) { rows.push(cur); cur = [...it] }
+    else cur = cur.length ? [...cur, dot, ...it] : [...it]
+  }
+  if (cur.length) rows.push(cur)
+  return rows
+}
+
+/** One sub agent on one row: status, type · task, then tokens and clock; a finished one is one dim line. */
+function agentRow(a: DeckAgent, w: number, frame: number, running: boolean, now: number): Line {
+  const label: Line = [...(a.type ? [{ t: a.type, b: true }, { t: ' · ', d: true }] : []), { t: a.task || 'agent', d: true }]
+  if (a.endedAt !== undefined) return [{ t: '✔', c: 'success' }, { t: ' ' }, { t: `${a.type ? a.type + ' · ' : ''}${a.task || 'agent'} · ${fmtTok(a.tokens)}`, d: true }]
+  const icon: Seg = running ? { t: SPIN[frame % SPIN.length]!, c: 'claude', b: true } : { t: '○', c: 'subtle' }
+  const stats: Line = [{ t: fmtTok(a.tokens), b: true }, { t: ' ' + clock(now - a.startedAt), d: true }]
+  const room = Math.max(4, w - 2 - len(stats) - 2)
+  return [icon, { t: ' ' }, ...padTo(clip(label, room), room), { t: '  ' }, ...stats]
+}
+
+const MAX_AGENT_ROWS = 4
+const CHECK: Record<DeckCheck['state'], (spin: string | undefined) => Seg> = {
+  done: () => ({ t: '✔', c: 'success' }),
+  working: spin => ({ t: spin ?? '○', c: 'claude', b: true }),
+  todo: () => ({ t: '○', c: 'subtle' }),
+}
+
+/**
+ * The deck as sections: header (no title), focus, usage, agents (only with sub agents), checks (only with an
+ * approved prompt). Colours are theme names only, so light and dark themes both read; nothing moves unless a
+ * turn runs. `w` is the text width inside the pane.
+ */
 export function deck(d: DeckData, w: number, frame: number, now: number): Section[] {
   const out: Section[] = []
-  const order = ['task', 'drift', 'session', 'live']
-  const litId = d.running ? order[Math.floor(frame / 6) % order.length] : undefined
-  const sec = (id: string, title: string, tone: string, body: Line[]) => out.push({ id, title, tone, body: body.map(l => clip(l, w)), lit: id === litId })
+  const sec = (id: string, title: string, tone: string, body: Line[], live = false, meta?: string) => out.push({ id, title, meta, tone, body: body.map(l => clip(l, w)), live: live && d.running })
+  const narrow = w < 40
+  const spinner = d.running ? SPIN[frame % SPIN.length]! : undefined
 
-  // task
-  const spin: Seg = d.running ? { t: SPIN[frame % SPIN.length]!, c: 'claude', b: true } : d.task ? { t: '✔', c: 'success' } : { t: '·', d: true }
-  const meta = [d.taskAt ? fmtDur(now - d.taskAt) : '', `${d.turns} turn${d.turns === 1 ? '' : 's'}`, [d.model, d.effort].filter(Boolean).join(' · ')].filter(Boolean)
-  const line2: Line = [{ t: meta.join('  ·  '), d: true }]
-  if (d.branch) line2.push({ t: `  ·  ⎇ ${d.branch}`, d: true }, ...(d.dirty ? [{ t: ` ±${d.dirty}`, c: 'warning' }] : []))
-  const line3: Line = []
-  if (d.tests) line3.push(d.tests.ok ? { t: `✔ ${d.tests.text}`, c: 'success' } : { t: `✘ ${d.tests.text}`, c: 'error' }, { t: `  ${fmtDur(now - d.tests.at)} ago`, d: true })
-  sec('task', '◆ TASK', 'claude', [
+  // header: topic, then time, turns, model, effort, lean, branch, files, tests
+  const spin: Seg = spinner ? { t: spinner, c: 'claude', b: true } : d.task ? { t: '✔', c: 'success' } : { t: '·', d: true }
+  const items: Line[] = []
+  if (d.taskAt !== undefined) items.push([{ t: fmtDur(now - d.taskAt) }])
+  items.push([{ t: String(d.turns), b: true }, { t: d.turns === 1 ? ' turn' : ' turns', d: true }])
+  if (d.model) items.push([{ t: d.model, c: 'claude', b: true }])
+  if (d.effort) items.push([{ t: d.effort }])
+  if (d.lean && d.lean !== 'off') items.push([{ t: d.lean === 'lite' ? 'lean lite' : 'lean', c: 'success' }])
+  if (d.branch) items.push([{ t: `⎇ ${d.branch}` }, ...(d.dirty ? [{ t: ` ±${d.dirty}`, c: 'warning' }] : [])])
+  if (d.touched?.length) {
+    const edited = d.touched.filter(t => t.edited).length
+    items.push([{ t: '✎ ', c: 'claude' }, { t: String(edited), b: true }, { t: ' edited', d: true }, ...(d.touched.length - edited ? [{ t: ` ${d.touched.length - edited} read`, d: true }] : [])])
+  }
+  if (d.tests) items.push([d.tests.ok ? { t: `✔ ${d.tests.text}`, c: 'success' } : { t: `✘ ${d.tests.text}`, c: 'error' }, { t: ` ${fmtDur(now - d.tests.at)} ago`, d: true }])
+  sec('head', '', 'claude', [
     [spin, { t: ' ' }, d.task ? { t: d.task, b: true } : { t: 'your next prompt becomes the task', d: true }],
-    line2,
-    ...(line3.length ? [line3] : []),
+    ...flow(items, w),
   ])
 
-  // drift
+  // focus: how far the session has drifted from the task
   const hi = d.drift.score >= DRIFT_AT
-  const tone = hi ? 'error' : d.drift.score >= 0.5 ? 'warning' : 'success'
-  sec('drift', hi ? '▲ DRIFT' : '◇ DRIFT', tone, [
+  const tone = hi ? 'error' : d.drift.score >= DRIFT_WARN ? 'warning' : 'success'
+  sec('focus', `${hi ? '▲' : '◇'} FOCUS`, tone, [
     ...driftGauge(d.drift.score, w),
-    [{ t: 'context ', d: true }, { t: d.drift.ctx.toFixed(2) }, { t: '   topic ', d: true }, { t: d.drift.topic.toFixed(2) }, { t: '   turns ', d: true }, { t: d.drift.turns.toFixed(2) }],
-    hi ? [{ t: '→ start a fresh session  ·  /helm:deck task to re-anchor', c: 'error', b: true }] : [{ t: `fresh session suggested at ${DRIFT_AT.toFixed(2)}`, d: true }],
+    ...(hi ? [[{ t: narrow ? '→ start fresh' : '→ start a fresh session  ·  /helm:prompt to start the next task', c: 'error', b: true }]] : []),
   ])
 
-  // session
+  // usage: context (with its trail), the 5h chart, the week meter, then cost and tokens
   const body: Line[] = []
+  const tw = Math.floor(w * 0.3)
   if (d.ctx) {
     const p = d.ctx.percent ?? (d.ctx.tokens ? (100 * d.ctx.tokens) / d.ctx.window : 0)
-    body.push(meter('context', p / 100, w, level(p), [{ t: `${Math.round(p)}%`, c: level(p), b: true }, ...(d.compactions ? [{ t: ' ' + '⟲'.repeat(Math.min(3, d.compactions)), c: 'suggestion' }] : [])]))
+    const cs = d.ctxSeries ?? []
+    body.push(meter('context', p / 100, w, level(p), [{ t: `${Math.round(p)}%`, c: level(p), b: true }, ...(d.compactions ? [{ t: ' ' + '⟲'.repeat(Math.min(3, d.compactions)), c: 'suggestion' }] : [])], undefined, cs.length >= 2 ? brailleLine(cs, tw, 1)[0] : undefined))
+  }
+  const limit = (label: string, l: { percentUsed: number; resetsAt?: string | number }) => {
+    const r = resetMs(l.resetsAt)
+    body.push(meter(label, l.percentUsed / 100, w, level(l.percentUsed), [{ t: `${Math.round(l.percentUsed)}%`, c: level(l.percentUsed), b: true }, { t: r && r > now ? ` ↻${fmtDur(r - now)}` : '', d: true }]))
   }
   const five = d.limits.find(l => /five|5h/i.test(l.kind))
-  if (five) {
+  const fs = d.fiveSeries ?? []
+  if (five && fs.length >= 2) {
     const r = resetMs(five.resetsAt)
-    body.push(meter('5h', five.percentUsed / 100, w, level(five.percentUsed), [{ t: `${Math.round(five.percentUsed)}%`, c: level(five.percentUsed), b: true }, { t: r && r > now ? ` ↻ ${fmtDur(r - now)}` : '', d: true }]))
-  }
+    const c = level(five.percentUsed)
+    body.push([{ t: '5h'.padEnd(narrow ? 5 : 8), d: true }, { t: `${Math.round(five.percentUsed)}%`, c, b: true }, ...(narrow || !r || r <= now ? [] : [{ t: '  ↻' + fmtDur(r - now), d: true }])])
+    for (const row of brailleLine(fs.map(x => x.pct), w, narrow ? 2 : 3)) body.push([{ t: row, c }])
+  } else if (five) limit('5h', five)
   const week = d.limits.find(l => /seven|week|7d/i.test(l.kind))
-  if (week) body.push(meter('week', week.percentUsed / 100, w, level(week.percentUsed), [{ t: `${Math.round(week.percentUsed)}%`, b: true }]))
-  const tk = d.tokens
-  const split = tokenSplit(tk)
-  const total = split.total
-  const figures: Line = []
-  const fig = (label: string, value: string, c?: string) => figures.push(...(figures.length ? [{ t: '   ', d: true }] : []), { t: label + ' ', d: true }, { t: value, c, b: true })
-  if (d.cost !== undefined) fig('cost', `$${d.cost.toFixed(2)}`)
-  const cacheBase = tk.input + tk.cacheRead + tk.cacheWrite
-  if (cacheBase > 0) fig('cache', `${Math.round((100 * tk.cacheRead) / cacheBase)}%`, tk.cacheRead / cacheBase > 0.7 ? 'success' : 'warning')
-  if (figures.length || total > 0) body.push([])
-  if (total > 0) body.push([{ t: 'tokens ', d: true }, { t: fmtTok(total), b: true }, { t: '   in ', d: true }, { t: fmtTok(split.in), b: true }, { t: '   out ', d: true }, { t: fmtTok(split.out), b: true }])
-  if (figures.length) body.push(figures)
-  if (body.length) sec('session', '◷ SESSION', 'suggestion', body)
+  if (week) limit('week', week)
+  const total = tokenSplit(d.tokens).total
+  const tail = [d.cost !== undefined ? `$${d.cost.toFixed(2)}` : '', total > 0 ? `${fmtTok(total)} tok` : ''].filter(Boolean)
+  if (tail.length) body.push([{ t: tail.join(' · '), d: true }])
+  if (body.length) sec('usage', '◷ USAGE', 'suggestion', body)
 
-  // map: the files this session touched, as a small tree
-  if (d.touched?.length) {
-    const byDir = new Map<string, { name: string; edited: boolean }[]>()
-    for (const t of (d.touched ?? []).slice(-12)) {
-      const k = t.path.lastIndexOf('/')
-      const dir = k < 0 ? './' : t.path.slice(0, k + 1)
-      const list = byDir.get(dir) ?? []
-      const name = t.path.slice(k + 1)
-      const had = list.find(x => x.name === name)
-      if (had) had.edited ||= t.edited
-      else list.push({ name, edited: t.edited })
-      byDir.set(dir, list)
-    }
-    const map: Line[] = []
-    for (const [dir, files] of [...byDir].slice(-4)) {
-      map.push([{ t: dir, c: 'suggestion', b: true }])
-      files.slice(-4).forEach((f, i, a) => map.push([{ t: i === a.length - 1 ? '└ ' : '├ ', d: true }, { t: f.name, c: f.edited ? 'claude' : undefined, d: !f.edited }, ...(f.edited ? [{ t: ' ✎', c: 'claude' }] : [])]))
-    }
-    sec('map', '⌘ FILES', 'suggestion', map)
+  // agents: only while the session has sub agents; running first, then the most recent finished
+  const ag = d.agents ?? []
+  if (ag.length) {
+    const running = ag.filter(a => a.endedAt === undefined)
+    const sorted = [...running, ...ag.filter(a => a.endedAt !== undefined).reverse()]
+    const shown = sorted.slice(0, MAX_AGENT_ROWS)
+    const rows = shown.map(a => agentRow(a, w, frame, d.running, now))
+    if (sorted.length > shown.length) rows.push([{ t: `+${sorted.length - shown.length} more`, d: true }])
+    const meta = [running.length ? `${running.length} running` : '', fmtTok(ag.reduce((n, a) => n + a.tokens, 0))].filter(Boolean).join(' · ')
+    sec('agents', '⌁ AGENTS', 'claude', rows, running.length > 0, meta)
   }
 
-  // live: what the current turn is doing, its tool mix, and how recent turns ended
-  const TOOL: Record<string, [string, string]> = { r: ['read', 'suggestion'], e: ['edit', 'claude'], f: ['find', 'success'], t: ['test', 'warning'], x: ['run', 'subtle'] }
-  const RES: Record<string, [string, string]> = { ok: ['✔', 'success'], warn: ['⚠', 'warning'], err: ['✘', 'error'], none: ['·', 'subtle'] }
-  const hist = d.history ?? []
-  const last = hist[hist.length - 1]
-  const live: Line[] = []
-  const cur = d.cur
-  if (d.running && cur) live.push([{ t: SPIN[frame % SPIN.length]!, c: 'claude', b: true }, { t: ' ' }, { t: cur.doing ?? 'thinking', c: 'claude', b: true }, ...(cur.target ? [{ t: ' ' + cur.target, b: true }] : [])])
-  else if (last) live.push([{ t: '✔', c: 'success', b: true }, { t: ' idle', d: true }, { t: ` · turn ${last.n} finished`, d: true }])
-  else live.push([{ t: 'waiting for the first turn', d: true }])
-  const seq = d.running ? cur?.seq ?? '' : last?.seq ?? cur?.seq ?? ''
-  const tok = d.running && cur ? total - cur.tok0 : last?.tok ?? 0
-  const ms = d.running && cur ? now - cur.at : last?.ms ?? 0
-  const counts = Object.keys(TOOL).map(k => [k, [...seq].filter(x => x === k).length] as const).filter(x => x[1] > 0)
-  const bw = Math.max(10, w - 14)
-  const mix: Line = []
-  if (!seq) mix.push({ t: '▆'.repeat(bw), c: 'subtle' })
-  else {
-    let used = 0
-    counts.forEach(([k, n], i) => {
-      const cw = i === counts.length - 1 ? bw - used : Math.max(1, Math.round((n / seq.length) * bw))
-      used += cw
-      mix.push({ t: '▆'.repeat(Math.max(0, cw)), c: TOOL[k]![1] })
-    })
+  // todo: Claude's own task list, while it has one
+  const td = d.todos ?? []
+  if (td.length) {
+    const done = td.filter(t => t.state === 'done').length
+    const shown = td.length > 8 ? [...td.filter(t => t.state !== 'done'), ...td.filter(t => t.state === 'done')].slice(0, 8) : td
+    const rows: Line[] = shown.map(t => [CHECK[t.state](spinner), { t: ' ' }, t.state === 'todo' ? { t: t.text, d: true } : t.state === 'done' ? { t: t.text, d: true } : { t: t.text, b: true }])
+    if (td.length > shown.length) rows.push([{ t: `+${td.length - shown.length} more`, d: true }])
+    sec('todo', '☰ TODO', done === td.length ? 'success' : 'claude', rows, td.some(t => t.state === 'working'), `${done} of ${td.length}`)
   }
-  if (seq || d.running) {
-    live.push([], [...mix, { t: '  ' }, { t: fmtTok(Math.max(0, tok)), b: true }, { t: ' ' + (ms < 60000 ? `${Math.round(ms / 1000)}s` : fmtDur(ms)), d: true }])
-    if (counts.length) live.push(counts.flatMap(([k, n], i) => [...(i ? [{ t: '  ' }] : []), { t: '■', c: TOOL[k]![1] }, { t: ` ${TOOL[k]![0]} ${n}`, d: true }]))
-    else live.push([{ t: 'no tools yet this turn', d: true }])
+
+
+  // checks: the approved prompt's acceptance items, ticked by Claude as it verifies them
+  const ck = d.checks ?? []
+  if (ck.length) {
+    const done = ck.filter(c => c.state === 'done').length
+    const all = done === ck.length
+    const row = (c: DeckCheck): Line => [CHECK[c.state](spinner), { t: ' ' }, c.state === 'todo' ? { t: c.text, d: true } : { t: c.text, b: c.state === 'working' }, ...(c.state === 'working' ? [{ t: '  ← working on', d: true }] : [])]
+    sec('checks', '☑ CHECKS', all ? 'success' : 'suggestion', ck.map(row), ck.some(c => c.state === 'working'), `${done} of ${ck.length}`)
   }
-  if (hist.length) {
-    const chips: Line = [{ t: 'last turns  ', d: true }]
-    for (const h of hist.slice(-6)) chips.push({ t: ` ${RES[h.result]![0]} `, c: RES[h.result]![1], inv: true, b: true }, { t: ' ' })
-    if (d.running) chips.push({ t: ` ${SPIN[frame % SPIN.length]} `, c: 'claude', inv: true, b: true })
-    live.push([], chips)
-    for (const h of hist.slice(-3).reverse()) live.push([{ t: `  #${h.n} `, b: true }, { t: `${RES[h.result]![0]} ${h.text}`, c: RES[h.result]![1] }, { t: ` · ${fmtTok(h.tok)}`, d: true }])
+  return out
+}
+
+/** The acceptance items of an approved prompt: `- [ ] text` (todo) or `- [x] text` (done) lines inside `<acceptance>`. */
+export function parseChecks(prompt: string): DeckCheck[] {
+  const m = /<acceptance>([\s\S]*?)<\/acceptance>/.exec(prompt)
+  if (!m) return []
+  const out: DeckCheck[] = []
+  for (const line of m[1]!.split('\n')) {
+    const x = /^\s*-\s*\[( |x|X)\]\s+(.+?)\s*$/.exec(line)
+    if (!x) continue
+    const text = /^`[^`]*`$/.test(x[2]!) ? x[2]!.slice(1, -1) : x[2]!
+    out.push({ text, state: x[1] === ' ' ? 'todo' : 'done' })
   }
-  sec('live', '⇣ LIVE', 'subtle', live)
   return out
 }
 
 /**
- * The open layout: per section a coloured title, then a rule a light sweeps across while a turn runs (each
- * section's light offset so they ripple down), then its body indented one column. No boxes.
+ * The open layout: per titled section a coloured title and a rule (a light sweeps it only where work is
+ * flowing, and only while a turn runs), then its body indented one column. The header has no title. No boxes.
  */
 const TITLE_TONE: Record<string, string> = { claude: 'claude', success: 'success', warning: 'warning', error: 'error', suggestion: 'suggestion', subtle: 'subtle' }
 export function layout(secs: Section[], w: number, frame: number, running: boolean): Line[] {
   const out: Line[] = []
   secs.forEach((sec, k) => {
-    const [, ico = '', name = sec.title] = /^(\S+) (.*)$/.exec(sec.title) ?? []
-    // The section being updated gets a pulsing dot in place of its icon while a turn runs.
-    const live = running && sec.lit
-    const dot: Seg = live ? { t: frame % 6 < 3 ? '●' : '○', c: 'claude', b: true } : { t: ico, c: TITLE_TONE[sec.tone], b: true }
-    const head: Line = [dot, { t: ' ' + name.toLowerCase(), c: live ? 'claude' : TITLE_TONE[sec.tone], b: true }, { t: ' ' }]
-    out.push([...head, ...rule(Math.max(4, w - len(head)), running ? frame * 2 - k * 9 : undefined)])
+    if (sec.title) {
+      const [, ico = '', name = sec.title] = /^(\S+) (.*)$/.exec(sec.title) ?? []
+      const head: Line = [{ t: ico, c: TITLE_TONE[sec.tone], b: true }, { t: ' ' + name.toLowerCase(), c: TITLE_TONE[sec.tone], b: true }, ...(sec.meta ? [{ t: ' · ' + sec.meta, d: true }] : []), { t: ' ' }]
+      out.push([...head, ...rule(Math.max(4, w - len(head)), running && sec.live ? frame * 2 - k * 9 : undefined)])
+    }
     for (const l of sec.body) out.push([{ t: ' ' }, ...l])
     out.push([])
   })
-  out.push([{ t: ' ' }, ...FOOTER])
   return out.map(l => clip(l, w))
+}
+
+// ── sub agents ────────────────────────────────────────────
+
+/** At most this many sub agents are kept; the oldest go first. */
+export const AGENTS_KEPT = 6
+
+/**
+ * A sub agent's model step, added to its own card (created on its first step, with the task and type the engine
+ * lists for it). Tokens are input + cache writes + output, as the main totals count them.
+ */
+export function agentStep(list: DeckAgent[], id: string, x: { model: string; tokens: number; now: number; task?: string; type?: string }): DeckAgent[] {
+  const model = x.model.replace(/^claude-/, '').replace(/-\d{8}$/, '')
+  const i = list.findIndex(a => a.id === id)
+  if (i < 0) return [...list, { id, task: x.task ?? '', type: x.type, model, tokens: x.tokens, steps: 1, startedAt: x.now }].slice(-AGENTS_KEPT)
+  return list.map((a, k) => (k === i ? { ...a, model, tokens: a.tokens + x.tokens, steps: a.steps + 1, task: a.task || x.task || '', type: a.type ?? x.type } : a))
+}
+
+export type StepUsage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
+type StepState = { tokens: DeckData['tokens']; agents?: DeckAgent[]; model?: string; effort?: string }
+
+/**
+ * One model step, routed: a sub agent's (it has `agentId`) goes to its own card only; the main loop's sets the
+ * model and effort and adds to the session totals. The main totals never include a sub agent's tokens.
+ */
+export function applyStep<S extends StepState>(s: S, e: { agentId?: string; model: string; effort?: unknown }, u: StepUsage | undefined, now: number, info?: { task?: string; type?: string }): S {
+  if (e.agentId) {
+    const tokens = u ? u.input_tokens + u.cache_creation_input_tokens + u.output_tokens : 0
+    return { ...s, agents: agentStep(s.agents ?? [], e.agentId, { model: e.model, tokens, now, ...info }) }
+  }
+  return {
+    ...s,
+    model: e.model.replace(/^claude-/, '').replace(/-\d{8}$/, ''),
+    effort: e.effort === undefined ? s.effort : String(e.effort),
+    tokens: u ? {
+      input: s.tokens.input + u.input_tokens,
+      output: s.tokens.output + u.output_tokens,
+      cacheRead: s.tokens.cacheRead + u.cache_read_input_tokens,
+      cacheWrite: s.tokens.cacheWrite + u.cache_creation_input_tokens,
+    } : s.tokens,
+  }
+}
+
+/** A sub agent's turn ended: its clock stops. */
+export function agentDone(list: DeckAgent[], id: string, at: number): DeckAgent[] {
+  return list.map(a => (a.id === id && a.endedAt === undefined ? { ...a, endedAt: at } : a))
 }
 
 /** How a turn ended, from what it did: tests decide; else whole-file reads or untested edits want a look. */
@@ -337,7 +490,6 @@ export function verdict(c: { seq: string; whole: number; edits: number; tests?: 
   return { result: 'ok', text: 'done' }
 }
 
-export const FOOTER: Line = [{ t: '/helm:deck task <text>  ·  /helm:deck reset  ·  /helm:prompt', d: true }]
 export const PANE_FRAME_MS = 120
 
 /** Whether the deck opens: on unless stored off for the project. */

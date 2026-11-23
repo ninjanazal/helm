@@ -6,7 +6,7 @@ HELM := sh scripts/helm.sh
 # Optional presets, passed through to the script: SCOPE=local|user FROM=here|github PIECES="…" HELM_YES=1
 export SCOPE FROM PIECES HELM_YES
 # make bench options: TASKS="a b" RUNS=3 MODEL=sonnet EFFORT=medium DRY=1 (list only) REPORT=1 (report only)
-export TASKS RUNS MODEL EFFORT DRY REPORT
+export TASKS RUNS MODEL EFFORT DRY REPORT ARMS ARM VS
 
 .PHONY: help setup remove status check bench
 help setup remove status check bench:
