@@ -235,8 +235,15 @@ function meter(label: string, p: number, w: number, c: string, value: Line, mark
   const lw = narrow ? 5 : 8
   const vw = narrow ? 11 : VALUE_W
   const name = narrow ? (SHORT[label] ?? label).slice(0, lw - 1) : label
-  const bw = Math.max(4, w - lw - 1 - vw - (trail ? trail.length + 1 : 0))
-  return [{ t: name.padEnd(lw), d: true }, ...bar(p, bw, c, mark), { t: ' ' }, ...padTo(value, vw), ...(trail ? [{ t: ' ' + trail, c }] : [])]
+  if (trail) {
+    // value unpadded, the trail right beside it; the bar takes the slack but keeps 4 cells, so the trail is capped to fit
+    const room = w - lw - 4 - 1 - len(value) - 1
+    const tr = trail.trimStart()
+    const t = tr.slice(-Math.min(tr.length, Math.max(0, room)))
+    if (t.length >= 2) return [{ t: name.padEnd(lw), d: true }, ...bar(p, w - lw - 1 - len(value) - 1 - t.length, c, mark), { t: ' ' }, ...value, { t: ' ' }, { t: t, c }]
+  }
+  const bw = Math.max(4, w - lw - 1 - vw)
+  return [{ t: name.padEnd(lw), d: true }, ...bar(p, bw, c, mark), { t: ' ' }, ...padTo(value, vw)]
 }
 
 /**
@@ -347,7 +354,7 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   if (five && fs.length >= 2) {
     const r = resetMs(five.resetsAt)
     const c = level(five.percentUsed)
-    body.push([{ t: '5h'.padEnd(narrow ? 5 : 8), d: true }, { t: `${Math.round(five.percentUsed)}%`, c, b: true }, ...(narrow ? [] : [{ t: '  ↻' + fmtDur((r ?? now) - now), d: true }])])
+    body.push([{ t: '5h'.padEnd(narrow ? 5 : 8), d: true }, { t: `${Math.round(five.percentUsed)}%`, c, b: true }, ...(narrow || !r || r <= now ? [] : [{ t: '  ↻' + fmtDur(r - now), d: true }])])
     for (const row of brailleLine(fs.map(x => x.pct), w, narrow ? 2 : 3)) body.push([{ t: row, c }])
   } else if (five) limit('5h', five)
   const week = d.limits.find(l => /seven|week|7d/i.test(l.kind))

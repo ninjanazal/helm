@@ -42,7 +42,6 @@ export type DeckState = {
   checks?: DeckCheck[]
   /** Claude's own task list (TodoWrite, or TaskCreate/TaskUpdate), as it last wrote it. */
   todos?: DeckTodo[]
-  /** What fills the context window: the /context categories in use, largest first. */
   /** The context % after each turn, newest last, at most 120. */
   ctxSeries?: number[]
   /** The 5h usage, a sample a minute, reset with its window. */

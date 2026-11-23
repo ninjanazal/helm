@@ -83,7 +83,7 @@ test('header: topic first, then time, turns, model, effort and branch, wrapped w
 
 test('deck: fits 24, 40 and 80 columns with 0 or 3 checks and 0 or 2 agents; empty sections are absent', () => {
   for (const w of [24, 40, 80]) for (const nc of [0, 3]) for (const na of [0, 2]) {
-    const d = data({ agents: [agent('a'), agent('b', { endedAt: 3.6e6 - 5000 })].slice(0, na), checks: five(2).slice(0, nc), drift: drift(95, 1, 60), todos: five(1), history: HIST })
+    const d = data({ agents: [agent('a'), agent('b', { endedAt: 3.6e6 - 5000 })].slice(0, na), checks: five(2).slice(0, nc), drift: drift(95, 1, 60), todos: five(1), history: HIST, ctxSeries: [20, 30, 45, 59], fiveSeries: [0, 10, 20, 30, 42].map((pct, i) => ({ at: i * 60_000, pct })) })
     const secs = deck(d, w, 3, 3.6e6)
     for (const l of layout(secs, w, 3, true)) expect(len(l)).toBeLessThanOrEqual(w)
     expect(secs.some(x => x.id === 'agents')).toBe(na > 0)
@@ -373,6 +373,8 @@ test('usage: context trail and 5h braille chart', () => {
   expect(u.slice(2, 5).some(r => B.test(r))).toBe(true)
   expect(u.length).toBeLessThanOrEqual(8)
   for (const r of u) expect([...r].length).toBeLessThanOrEqual(46)
+  expect(u[0]!.match(/59% ⟲( +)[⠁-⣿]/)![1]!.length).toBeLessThanOrEqual(2)
+  expect(rows(46, { limits: [{ kind: 'five_hour', percentUsed: 42 }] })[1]).not.toContain('↻')
   const n = rows(32)
   expect(n[1]).not.toContain('↻')
   // two chart rows at narrow widths; 0-42% only reaches the lower one
