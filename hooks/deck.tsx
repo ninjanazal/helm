@@ -3,6 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { DRIFT_AT, PANE_FRAME_MS, addCtx, addFive, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, layout, terms, tokenSplit, topicShift, verdict } from './deck-core'
 import type { DeckData, FeedItem, StepUsage } from './deck-core'
 import type { DeckCheck, DeckDone, DeckState } from '../types'
+import { readLevel } from './lean'
 
 /**
  * The deck pane: the session's health beside the chat. Every figure comes from the engine (session.measure,
@@ -46,6 +47,10 @@ async function poll($: EngineInterface) {
   await quiet(async () => {
     const u = await $.session.usage()
     await set($, s => ({ ...s, ctx: u.context, limits: (u.rateLimits ?? []).map(r => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt })), cost: u.cost?.usd, startedAt: u.startedAt }))
+  })
+  await quiet(async () => {
+    const lean = await readLevel($)
+    await set($, s => (s.lean === lean ? s : { ...s, lean }))
   })
   await quiet(async () => {
     const r = await $.process.run(['git', 'status', '--porcelain', '-b'], opts)

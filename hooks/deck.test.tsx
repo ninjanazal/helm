@@ -318,11 +318,13 @@ test('todo section: counts, states, hidden without a list', () => {
   expect(deck(data(), 46, 0, 3.6e6).some(x => x.id === 'todo')).toBe(false)
 })
 
-test('turns: the last asks newest first, with time, tokens and cost', () => {
-  const rows = deck(data({ history: HIST }), 50, 0, 3.6e6).find(x => x.id === 'turns')!.body.map(l => l.map(s => s.t).join(''))
-  expect(rows[0]).toMatch(/^#7 "fix the colours to match.*… +52s  14k  \$0\.31$/)
-  expect(rows[1]).toMatch(/^#6 "what can we add" +8s 2\.0k  \$0\.04$/)
-  expect(deck(data({ history: undefined }), 50, 0, 3.6e6).some(x => x.id === 'turns')).toBe(false)
+test('turns: no turns section; the header shows the lean level next to effort', () => {
+  expect(deck(data({ history: HIST }), 50, 0, 3.6e6).some(x => x.id === 'turns')).toBe(false)
+  const head = (lean?: 'off' | 'lite' | 'full') => text(deck(data({ lean }), 60, 0, 3.6e6).slice(0, 1))
+  expect(head('full')).toContain('medium · lean')
+  expect(head('lite')).toContain('lean lite')
+  expect(head('off')).not.toContain('lean')
+  expect(head()).not.toContain('lean')
 })
 
 test('brailleLine: exact cells for flat, rising, drop, multi-row, partial and clamped', () => {

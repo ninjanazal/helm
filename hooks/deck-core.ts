@@ -17,6 +17,8 @@ export type DeckData = {
   turns: number
   model?: string
   effort?: string
+  /** helm's lean level, as stored (it applies from the next session or /clear). */
+  lean?: 'off' | 'lite' | 'full'
   branch?: string
   dirty?: number
   tests?: { ok: boolean; text: string; at: number }
@@ -311,13 +313,14 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   const narrow = w < 40
   const spinner = d.running ? SPIN[frame % SPIN.length]! : undefined
 
-  // header: topic, then time, turns, model, effort, branch, files, tests
+  // header: topic, then time, turns, model, effort, lean, branch, files, tests
   const spin: Seg = spinner ? { t: spinner, c: 'claude', b: true } : d.task ? { t: '✔', c: 'success' } : { t: '·', d: true }
   const items: Line[] = []
   if (d.taskAt !== undefined) items.push([{ t: fmtDur(now - d.taskAt) }])
   items.push([{ t: String(d.turns), b: true }, { t: d.turns === 1 ? ' turn' : ' turns', d: true }])
   if (d.model) items.push([{ t: d.model, c: 'claude', b: true }])
   if (d.effort) items.push([{ t: d.effort }])
+  if (d.lean && d.lean !== 'off') items.push([{ t: d.lean === 'lite' ? 'lean lite' : 'lean', c: 'success' }])
   if (d.branch) items.push([{ t: `⎇ ${d.branch}` }, ...(d.dirty ? [{ t: ` ±${d.dirty}`, c: 'warning' }] : [])])
   if (d.touched?.length) {
     const edited = d.touched.filter(t => t.edited).length
@@ -386,17 +389,6 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
     sec('todo', '☰ TODO', done === td.length ? 'success' : 'claude', rows, td.some(t => t.state === 'working'), `${done} of ${td.length}`)
   }
 
-  // turns: what each of the last asks took and cost, newest first
-  const hist = (d.history ?? []).slice(-4).reverse()
-  if (hist.length) {
-    const rows = hist.map(h => {
-      const stats: Line = [{ t: clock(h.ms), d: true }, { t: ' ' }, { t: fmtTok(h.tok).padStart(4) }, ...(h.cost !== undefined ? [{ t: ' ' }, { t: `$${h.cost.toFixed(2)}`.padStart(6), b: true }] : [])]
-      const room = Math.max(4, w - len(stats) - 2 - String(h.n).length - 2)
-      const ask: Line = h.ask ? [{ t: `"${h.ask}"` }] : [{ t: '(no prompt)', d: true }]
-      return [{ t: `#${h.n} `, d: true }, ...padTo(clip(ask, room), room), { t: '  ' }, ...stats]
-    })
-    sec('turns', '↺ TURNS', 'subtle', rows)
-  }
 
   // checks: the approved prompt's acceptance items, ticked by Claude as it verifies them
   const ck = d.checks ?? []

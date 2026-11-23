@@ -19,6 +19,8 @@ export type DeckState = {
   turns: number
   model?: string
   effort?: string
+  /** helm's lean level, as stored. */
+  lean?: 'off' | 'lite' | 'full'
   branch?: string
   dirty?: number
   tests?: { ok: boolean; text: string; at: number }
