@@ -4,6 +4,8 @@ import { DRIFT_AT, PANE_FRAME_MS, PIPE_ROWS, TEST_RE, addCtx, addFive, agentDone
 import type { DeckData, FeedItem, Phase, StepUsage } from './deck-core'
 import type { DeckDone, DeckState } from '../types'
 import { readLevel } from './lean'
+import { readMode } from './workload'
+import { readLevel as readTesting } from './testing'
 
 /**
  * The deck pane: the session's health beside the chat. Every figure comes from the engine (session.measure,
@@ -53,11 +55,27 @@ async function poll($: EngineInterface) {
     await set($, s => (s.lean === lean ? s : { ...s, lean }))
   })
   await quiet(async () => {
+    const workload = await readMode($)
+    await set($, s => (s.workload === workload ? s : { ...s, workload }))
+  })
+  await quiet(async () => {
+    const testing = await readTesting($)
+    await set($, s => (s.testing === testing ? s : { ...s, testing }))
+  })
+  await quiet(async () => {
     const r = await $.process.run(['git', 'status', '--porcelain', '-b'], opts)
     if (r.exitCode !== 0) return
     const lines = String(r.stdout).split('\n').filter(Boolean)
     const branch = lines[0]?.replace(/^## /, '').split('...')[0]
-    await set($, s => ({ ...s, branch, dirty: lines.length - 1 }))
+    let added = 0, removed = 0
+    const n = await $.process.run(['git', 'diff', '--numstat', 'HEAD'], opts).catch(() => undefined)
+    if (n && n.exitCode === 0) for (const l of String(n.stdout).split('\n')) {
+      const [a, r] = l.split('\t')  // binary files show '-': counted as a file, no lines
+      added += Number(a) || 0
+      removed += Number(r) || 0
+    }
+    const changes = { files: lines.length - 1, added, removed }
+    await set($, s => ({ ...s, branch, changes: s.changes && s.changes.files === changes.files && s.changes.added === added && s.changes.removed === removed ? s.changes : changes }))
   })
 }
 
@@ -268,7 +286,6 @@ export async function deckTool($: EngineInterface, e: { tool: string; agentId?: 
       const cmd = String(input.command ?? '')
       if (TEST_RE.test(cmd)) {
         const m = TEST_RE.exec(cmd)![0]
-        await set($, s => ({ ...s, tests: { ok: !err, text: m, at: now } }))
         f = { kind: 'test', text: m, note: err ? 'failed' : 'passed', tone: err ? 'bad' : 'good' }
       } else f = { kind: 'run', text: cmd.split('\n')[0]!.slice(0, 40), note: err ? 'exit≠0' : undefined, tone: err ? 'bad' : undefined }
     } else if (tool === 'TodoWrite' || tool === 'TaskCreate' || tool === 'TaskUpdate') {

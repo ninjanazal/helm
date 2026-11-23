@@ -23,27 +23,32 @@ printf '2\n\n' | run setup
 has "$T/calls" 'superpowers@claude-plugins-official --scope user' && has "$T/calls" 'install helm --marketplace .* --scope user' \
   && ok 'setup: every project installs everything there' || bad 'setup: every project installs everything there'
 
-printf '1\n2\ny\n' | run setup
+printf '1\n\n2\ny\n' | run setup
 has "$T/calls" 'plugin uninstall helm@helm --scope local' && has "$T/calls" 'uninstall superpowers' && ! has "$T/calls" 'plugin install' \
   && ok 'setup: remove choice removes after confirm' || bad 'setup: remove choice removes after confirm'
 
-printf '1\n2\nn\n' | run setup
+printf '1\n\n2\nn\n' | run setup
 ! has "$T/calls" uninstall && ok 'setup: remove declined removes nothing' || bad 'setup: remove declined removes nothing'
+
+mkdir -p "$T/proj"
+printf '1\n%s\n\n' "$T/proj" | run setup
+has "$T/out" "project $T/proj" && has "$T/calls" 'install helm --marketplace .* --scope local' \
+  && ok 'setup: asks for a project path and uses it' || bad 'setup: asks for a project path and uses it'
 
 reset; sh scripts/helm.sh setup < /dev/null > "$T/out" 2>&1; e=$?
 [ $e -eq 0 ] && has "$T/calls" 'install helm --marketplace .* --scope local' && ok 'setup: no tty takes defaults' || bad 'setup: no tty takes defaults'
 
-printf '1\n9\n1\n' | run setup
+printf '1\n\n9\n1\n' | run setup
 has "$T/out" 'not a choice' && has "$T/calls" 'install helm' \
   && ok 'setup: bad choice is re-asked' || bad 'setup: bad choice is re-asked'
 
 reset; sh scripts/helm.sh remove < /dev/null > "$T/out" 2>&1; e=$?
 [ $e -eq 1 ] && has "$T/out" 'make remove' && ! has "$T/calls" uninstall && ok 'remove: no tty refuses' || bad 'remove: no tty refuses'
 
-printf '1\ny\n' | run remove
+printf '1\n\ny\n' | run remove
 has "$T/calls" 'plugin uninstall helm@helm --scope local' && ok 'remove: confirmed removes' || bad 'remove: confirmed removes'
 
-printf '1\nn\n' | run remove
+printf '1\n\nn\n' | run remove
 ! has "$T/calls" uninstall && ok 'remove: declined removes nothing' || bad 'remove: declined removes nothing'
 
 reset; PATH=/usr/bin:/bin sh scripts/helm.sh status > "$T/out" 2>&1; e=$?

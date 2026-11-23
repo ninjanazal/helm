@@ -1,6 +1,8 @@
 import type { EngineInterface } from 'claude-code'
 import { engineIo, setTask } from './task'
 import { leanSet } from './lean'
+import { workloadSet } from './workload'
+import { testingSet } from './testing'
 import { deckOpenNow, deckReset, deckSet, deckTask } from './deck'
 
 /**
@@ -47,6 +49,26 @@ export async function registerHelmTools($: EngineInterface): Promise<void> {
     isDeferred: false,
   })
   await $.tool.register({
+    name: 'workload',
+    description: 'Workload: how much work goes to cheaper sub agents. action: off, sometimes, always, or status.',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: { action: { type: 'string', enum: ['off', 'sometimes', 'always', 'status'] } },
+    },
+    isDeferred: false,
+  })
+  await $.tool.register({
+    name: 'testing',
+    description: 'Testing: how much testing helm writes and runs. action: off, light, thorough, or status.',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: { action: { type: 'string', enum: ['off', 'light', 'thorough', 'status'] } },
+    },
+    isDeferred: false,
+  })
+  await $.tool.register({
     name: 'set_task',
     description:
       'Saves the approved prompt as the current task (.claude/helm/task.md) and sets the deck task to its goal. ' +
@@ -81,6 +103,8 @@ export async function handleHelmTool($: EngineInterface, tool: string, args: Rec
     const a = str(args.action)
     return toolText(await leanSet($, a === 'on' ? 'full' : a))
   }
+  if (tool === 'mcp__helm__workload') return toolText(await workloadSet($, str(args.action)))
+  if (tool === 'mcp__helm__testing') return toolText(await testingSet($, str(args.action)))
   if (tool === 'mcp__helm__set_task') {
     const prompt = str(args.prompt)?.trim()
     const goal = str(args.goal)?.trim()

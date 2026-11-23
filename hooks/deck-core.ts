@@ -19,10 +19,17 @@ export type DeckData = {
   model?: string
   effort?: string
   /** helm's lean level, as stored (it applies from the next session or /clear). */
+  /** The task's keywords and the last prompts' keywords, for the focus text. */
+  taskTerms?: string[]
+  recent?: string[][]
   lean?: 'off' | 'lite' | 'full'
+  /** helm's workload mode, as stored (it applies from the next session or /clear). */
+  workload?: 'off' | 'sometimes' | 'always'
+  /** helm's testing level, as stored. */
+  testing?: 'off' | 'light' | 'thorough'
   branch?: string
-  dirty?: number
-  tests?: { ok: boolean; text: string; at: number }
+  /** Working tree vs HEAD: changed files (tracked and untracked) and the tracked lines added and removed. */
+  changes?: { files: number; added: number; removed: number }
   ctx?: { tokens?: number; window: number; percent?: number }
   limits: { kind: string; percentUsed: number; resetsAt?: string | number }[]
   compactions: number
@@ -244,6 +251,53 @@ export function driftGauge(p: number, w: number): Line[] {
   return [meter('focus', p, w, zone(p), [{ t: word, c: zone(p), b: true }])]
 }
 
+/** The words the task is anchored on, and the recent words that are not part of it. */
+const keywords = (words: string[] | undefined, n: number) => (words ?? []).slice(0, n)
+const strayWords = (d: Pick<DeckData, 'taskTerms' | 'recent'>, n: number) => {
+  const task = new Set(d.taskTerms ?? [])
+  return [...new Set((d.recent ?? []).flat())].filter(w => !task.has(w)).slice(0, n)
+}
+
+/** Word-wrap `text` to rows of at most `w` cells, at most `max` rows; what does not fit is cut with `…`. */
+export function wrapText(text: string, w: number, max: number): string[] {
+  const rows: string[] = []
+  let cur = ''
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    if (cur && [...cur].length + 1 + [...word].length > w) { rows.push(cur); cur = word } else cur = cur ? `${cur} ${word}` : word
+  }
+  if (cur) rows.push(cur)
+  const out = rows.slice(0, max).map(r => ([...r].length > w ? [...r].slice(0, Math.max(0, w - 1)).join('') + '…' : r))
+  if (rows.length > max) out[max - 1] = [...out[max - 1]!.replace(/…$/, '')].slice(0, Math.max(0, w - 1)).join('') + '…'
+  return out
+}
+
+/**
+ * Sentences on what the session is focused on (the task's own keywords) and, once the bar passes the warning
+ * mark, why it drifts: every factor at 25% or more of its cap, strongest first, with the detail that shows it.
+ * Works for any task, not only code.
+ */
+export function focusNote(d: Pick<DeckData, 'taskTerms' | 'recent' | 'drift' | 'turns'>, w: number): Line[] {
+  const dr = d.drift
+  const rows: Line[] = []
+  const on = keywords(d.taskTerms, 5)
+  if (on.length) {
+    const lead = 'Working on: '
+    wrapText(lead + on.join(', ') + '.', w, 2).forEach((r, i) => rows.push(i === 0 && r.startsWith(lead) ? [{ t: lead, d: true }, { t: r.slice(lead.length), b: true }] : [{ t: r, b: true }]))
+  }
+  if (dr.score < DRIFT_WARN) return rows
+  const stray = strayWords(d, 3)
+  const factors = [
+    { share: dr.ctx / 0.4, text: `the context is ${Math.round((dr.ctx / 0.4) * 100)}% full` },
+    { share: dr.topic / 0.4, text: stray.length ? `recent prompts are about ${stray.join(', ')}, not the task` : 'recent prompts differ from the task' },
+    { share: dr.turns / 0.2, text: `${d.turns} turns on this task` },
+  ].sort((a, b) => b.share - a.share)
+  const parts = factors.filter(f => f.share >= 0.25).map(f => f.text)
+  const why = `${dr.score >= DRIFT_AT ? 'Start fresh' : 'Drifting'}: ${(parts.length ? parts : [factors[0]!.text]).join('; ')}.`
+  const c = dr.score >= DRIFT_AT ? 'error' : 'warning'
+  for (const r of wrapText(why, w, 3)) rows.push([{ t: r, c }])
+  return rows
+}
+
 /** Meters share one bar length: a fixed value column, so bars start and end together. Narrow panes shrink both columns. */
 const VALUE_W = 14
 const SHORT: Record<string, string> = { context: 'ctx', week: 'wk' }
@@ -329,49 +383,57 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   const narrow = w < 40
   const spinner = d.running ? SPIN[frame % SPIN.length]! : undefined
 
-  // task: the goal, what is happening now, then model, effort and lean as chips, then the session's facts
+  // task: the goal (the live state is shown at the bottom), then model and effort on a line, lean and workload together on the next, then the session's facts, a blank row before the facts
   const mv = d.running
   const goal: Line = [d.task ? (d.running ? { t: '◎ ', c: 'claude', b: true } : { t: '✔ ', c: 'success' }) : { t: '· ', d: true },
     d.task ? { t: marquee(d.task, w - 2, frame, mv), b: true } : { t: 'your next prompt becomes the task', d: true }]
   const ph = d.phase ?? { kind: 'idle' as const }
-  const nowRow: Line = ph.kind === 'tool'
-    ? [{ t: (GLYPH[ph.verb] ?? '·') + ' ', c: 'suggestion', b: true }, { t: ph.verb + ' ', c: 'suggestion', b: true }, { t: marquee(ph.target, Math.max(4, w - 3 - ph.verb.length), frame, mv) }]
-    : ph.kind === 'thinking' ? [{ t: (spinner ?? '·') + ' ', c: 'claude' }, { t: 'writing', c: 'claude', b: true }]
-    : ph.kind === 'waiting' ? [{ t: '? ', c: 'warning', b: true }, { t: 'waiting on you', c: 'warning', b: true }]
-    : [{ t: '○ ', c: 'subtle' }, { t: 'idle', d: true }]
-  const chips: Line[] = []
-  if (d.model) chips.push([{ t: ` ${d.model} `, bg: 'claude', b: true }])
+  // one line each: model and effort, lean, workload; a chip row marks the stored choice
+  const modelRow: Line = []
+  if (d.model) modelRow.push({ t: ` ${d.model} `, bg: 'claude', b: true })
   if (d.effort) {
     const n = EFFORT[d.effort]
-    chips.push(n ? [{ t: '▰'.repeat(n), c: 'suggestion' }, { t: '▱'.repeat(4 - n), c: 'subtle' }, { t: ' ' + d.effort, c: 'suggestion', b: true }] : [{ t: d.effort, c: 'suggestion', b: true }])
+    if (modelRow.length) modelRow.push({ t: ' ' })
+    modelRow.push(...(n ? [{ t: '▰'.repeat(n), c: 'suggestion' }, { t: '▱'.repeat(4 - n), c: 'subtle' }, { t: ' ' + d.effort, c: 'suggestion', b: true }] : [{ t: d.effort, c: 'suggestion', b: true }]))
   }
-  if (d.lean) chips.push([{ t: 'lean ', d: true }, ...(['off', 'lite', 'full'] as const).map((l): Seg => (l === d.lean ? { t: ` ${l} `, bg: 'success', b: true } : { t: ` ${l} `, d: true }))])
+  // a stored choice as a bar like effort's: filled cells grow with the level, then its name
+  const choice = <T extends string>(label: string, all: readonly T[], cur: T): Line => {
+    const n = all.indexOf(cur)
+    return [{ t: label + ' ', d: true }, { t: '▰'.repeat(n), c: 'success' }, { t: '▱'.repeat(all.length - 1 - n), c: 'subtle' }, { t: ' ' + cur, c: 'success', b: true }]
+  }
+  const settings: Line[] = []
+  if (modelRow.length) settings.push(modelRow)
+  const modes: Line[] = []
+  if (d.lean) modes.push(choice('lean', ['off', 'lite', 'full'], d.lean))
+  if (d.workload) modes.push(choice('workload', ['off', 'sometimes', 'always'], d.workload))
+  if (d.testing) modes.push(choice('testing', ['off', 'light', 'thorough'], d.testing))
+  settings.push(...flow(modes, w, '  '))  // lean and workload share a line; they wrap only when it is too narrow
   const items: Line[] = []
   if (d.taskAt !== undefined) items.push([{ t: fmtDur(now - d.taskAt) }])
   items.push([{ t: String(d.turns), b: true }, { t: d.turns === 1 ? ' turn' : ' turns', d: true }])
-  if (d.branch) items.push([{ t: `⎇ ${d.branch}` }, ...(d.dirty ? [{ t: ` ±${d.dirty}`, c: 'warning' }] : [])])
+  if (d.branch) items.push([{ t: `⎇ ${d.branch}` }])
+  if (d.changes && d.changes.files > 0) items.push([{ t: String(d.changes.files), b: true }, { t: d.changes.files === 1 ? ' file ' : ' files ', d: true }, { t: `+${d.changes.added}`, c: 'success' }, { t: ' ' }, { t: `−${d.changes.removed}`, c: 'error' }])
   if (d.touched?.length) {
     const edited = d.touched.filter(t => t.edited).length
     items.push([{ t: '✎ ', c: 'claude' }, { t: String(edited), b: true }, { t: ' edited', d: true }, ...(d.touched.length - edited ? [{ t: ` ${d.touched.length - edited} read`, d: true }] : [])])
   }
-  if (d.tests) items.push([d.tests.ok ? { t: `✔ ${d.tests.text}`, c: 'success' } : { t: `✘ ${d.tests.text}`, c: 'error' }, { t: ` ${fmtDur(now - d.tests.at)} ago`, d: true }])
-  sec('head', '▣ TASK', 'claude', [goal, nowRow, ...flow(chips, w, ' '), ...flow(items, w)], ph.kind !== 'idle')
+  sec('head', '▣ TASK', 'claude', [goal, ...settings, ...(settings.length ? [[]] : []), ...flow(items, w)], ph.kind !== 'idle')
 
   // focus: how far the session has drifted from the task
   const hi = d.drift.score >= DRIFT_AT
   const tone = hi ? 'error' : d.drift.score >= DRIFT_WARN ? 'warning' : 'success'
   sec('focus', `${hi ? '▲' : '◇'} FOCUS`, tone, [
     ...driftGauge(d.drift.score, w),
+    ...focusNote(d, w),
     ...(hi ? [[{ t: narrow ? '→ start fresh' : '→ start a fresh session  ·  /helm:prompt to start the next task', c: 'error', b: true }]] : []),
   ])
 
-  // usage: context (with its trail), the 5h chart, the week meter, then cost and tokens
+  // usage: context, the 5h chart, the week meter, then cost and tokens
   const body: Line[] = []
-  const tw = Math.floor(w * 0.3)
   if (d.ctx) {
     const p = d.ctx.percent ?? (d.ctx.tokens ? (100 * d.ctx.tokens) / d.ctx.window : 0)
     const cs = d.ctxSeries ?? []
-    body.push(meter('context', p / 100, w, level(p), [{ t: `${Math.round(p)}%`, c: level(p), b: true }, ...(d.compactions ? [{ t: ' ' + '⟲'.repeat(Math.min(3, d.compactions)), c: 'suggestion' }] : [])], undefined, cs.length >= 2 ? brailleLine(cs, tw, 1)[0] : undefined))
+    body.push(meter('context', p / 100, w, level(p), [{ t: `${Math.round(p)}%`, c: level(p), b: true }, ...(d.compactions ? [{ t: ' ' + '⟲'.repeat(Math.min(3, d.compactions)), c: 'suggestion' }] : [])]))
   }
   const limit = (label: string, l: { percentUsed: number; resetsAt?: string | number }) => {
     const r = resetMs(l.resetsAt)
@@ -387,8 +449,8 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   } else if (five) limit('5h', five)
   const week = d.limits.find(l => /seven|week|7d/i.test(l.kind))
   if (week) limit('week', week)
-  const total = tokenSplit(d.tokens).total
-  const tail = [d.cost !== undefined ? `$${d.cost.toFixed(2)}` : '', total > 0 ? `${fmtTok(total)} tok` : ''].filter(Boolean)
+  const tk = tokenSplit(d.tokens)
+  const tail = [d.cost !== undefined ? `$${d.cost.toFixed(2)}` : '', tk.total > 0 ? [`in ${fmtTok(tk.in)}`, `out ${fmtTok(tk.out)}`].join(narrow ? ' ' : ' · ') : ''].filter(Boolean)
   if (tail.length) body.push([{ t: tail.join(' · '), d: true }])
   if (body.length) sec('usage', '◷ USAGE', 'suggestion', body)
 

@@ -2,7 +2,7 @@
 # helm setup script: the make targets call this. Asks where and what when a person is there to answer.
 #   sh scripts/helm.sh help|setup|remove|status|check|bench
 #   non-interactive (used by the old make names): install|uninstall <piece>, update, enable, disable, test, validate
-# Presets, all optional: SCOPE=local|user  FROM=here|github  PIECES="helm superpowers"  HELM_YES=1
+# Presets, all optional: SCOPE=local|user  PROJECT=<dir>  FROM=here|github  PIECES="helm superpowers"  HELM_YES=1
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PLUGIN=helm MARKETPLACE=helm GITHUB=ninjanazal/helm
@@ -24,13 +24,19 @@ die()  { say "$*" >&2; exit 1; }
 interactive() { [ -n "$HELM_INTERACTIVE" ] || [ -t 0 ]; }
 has_claude() { command -v claude >/dev/null 2>&1; }
 
-scope_word() { [ "$1" = user ] && say 'every project' || say 'this project'; }
+scope_word() { [ "$1" = user ] && say 'every project' || say "project $(pwd)"; }
 source_() { [ "$FROM" = github ] && say "$GITHUB" || say "$ROOT"; }
 
 # plugin_scopes <id>: the scopes it is installed at, space separated (empty when none or no claude).
 plugin_scopes() {
   has_claude || return 0
-  claude plugin list 2>/dev/null | grep -A3 "$1" | sed -n 's/.*Scope: *//p' | sort -u | tr '\n' ' '
+  if command -v jq >/dev/null 2>&1; then
+    # local installs belong to one project: count only the ones for the current directory.
+    claude plugin list --json 2>/dev/null | jq -r --arg id "$1" --arg cwd "$(pwd)" \
+      '[.[] | select(.id == $id) | select(.scope != "local" or .projectPath == $cwd) | .scope] | unique | join(" ")'
+  else
+    claude plugin list 2>/dev/null | grep -A3 "$1" | sed -n 's/.*Scope: *//p' | sort -u | tr '\n' ' '
+  fi
 }
 at_scope() { case " $(plugin_scopes "$1") " in *" $SCOPE "*) return 0;; esac; return 1; }
 
@@ -55,9 +61,26 @@ ask_scope() {
   say '  2) every project'
   while :; do
     printf '> '; read -r a || a=
-    case $a in ''|1) SCOPE=local; return;; 2) SCOPE=user; return;; *) say "${Y}not a choice:${R} $a";; esac
+    case $a in ''|1) SCOPE=local; break;; 2) SCOPE=user; return;; *) say "${Y}not a choice:${R} $a";; esac
+  done
+  ask_project
+}
+
+# ask_project: local scope works on the current directory; let the person pick another. Empty keeps it.
+ask_project() {
+  [ -n "$PROJECT" ] && return
+  interactive || return 0
+  say ''; say "${B}Project path?${R} ${D}(empty: $(pwd))${R}"
+  while :; do
+    printf '> '; read -r a || a=
+    case $a in '~') a=$HOME;; '~/'*) a=$HOME/${a#\~/};; esac
+    [ -z "$a" ] && return
+    [ -d "$a" ] && { PROJECT=$a; use_project; return; }
+    say "${Y}not a directory:${R} $a"
   done
 }
+# use_project: claude's local scope follows the working directory, so move there.
+use_project() { [ -n "$PROJECT" ] && [ "$SCOPE" != user ] && { cd "$PROJECT" || die "${Y}○${R} cannot enter $PROJECT"; }; return 0; }
 
 need_claude() { has_claude || die "${Y}○${R} claude not found: install Claude Code first."; }
 
@@ -166,6 +189,8 @@ cmd_bench() {
 }
 
 cmd_help() {
+  # Start on a clean screen, but only for a person at a terminal (not pipes or NO_COLOR).
+  [ -t 1 ] && [ -z "$NO_COLOR" ] && [ -n "$TERM" ] && printf '\033[H\033[2J'
   version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$ROOT/.claude-plugin/plugin.json" | head -1)
   printf '\n  %s⎈ %shelm%s %sv%s · Claude Code plugin%s\n\n' "$M" "$B" "$R" "$D" "$version" "$R"
   printf '    %smake setup%s    install / update or remove helm and superpowers %s(asks where, then what)%s\n' "$C" "$R" "$D" "$R"
@@ -178,6 +203,7 @@ cmd_help() {
 
 verb=${1:-help}; [ $# -gt 0 ] && shift
 case $SCOPE in global) SCOPE=user;; esac
+use_project
 case $verb in
   help|setup|remove|status|check|bench|update|enable|disable|test|validate) "cmd_$verb" ;;
   install|uninstall)

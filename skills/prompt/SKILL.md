@@ -58,6 +58,11 @@ Use this exact shape. The static parts come first; every line has to be specific
 <assumptions>Defaults you picked without asking, each one line, so the person can veto them.</assumptions>
 ```
 
+## 3b. Match the acceptance to the testing level
+Read the testing level: the file `.claude/helm/testing` if it exists, else call `mcp__helm__testing` with
+`{ "action": "status" }`. `off`: acceptance lists only the existing checks the change could break, no new tests.
+`light`: add checks for risky logic only. `thorough`: also add edge-case and regression checks, and the full suite.
+
 ## 4. Check the prompt before showing it
 Fix it, don't just flag it, if any of these is true:
 - The goal is vague ("improve", "clean up") with no observable result.
@@ -68,6 +73,10 @@ Fix it, don't just flag it, if any of these is true:
 - It repeats itself, or holds generic advice that would fit any task.
 
 ## 4b. Offer to split the work (only when it fits)
+First read the workload mode: the file `.claude/helm/workload` if it exists, else call `mcp__helm__workload` with
+`{ "action": "status" }`. `off`: skip this step silently, never offer a split. `always`: when the work has 2+
+units, split without asking (still pick a model per unit) and skip the question below. `sometimes`: as follows.
+
 Once the prompt passes step 4, and before showing it, judge whether the task is big enough to split. It is when
 **all** hold: it breaks into 3+ units that touch disjoint files, each unit has its own deterministic check, and
 no unit needs a design decision from another. Small, tightly coupled or judgement-heavy work is not split:

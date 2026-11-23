@@ -46,6 +46,8 @@ rm -rf .claude/helm/tasks .claude/helm/team.json
 | `/helm:switch [on \| off]` | Turn helm on or off for this project (deck pane and lean mode) |
 | `/helm:prompt <request>` | The one to work with: give it a task, it builds a complete prompt, and once you approve, "go" runs the pipeline (brainstorming, plans, split to cheaper sub agents) |
 | `/helm:lean [on \| off \| lite \| full]` | Lean mode, on by default: fewer output tokens (answer first, no recap, smallest complete change) without dropping checks. Pin per project with `.claude/helm/lean` |
+| `/helm:testing [off \| light \| thorough]` | How much testing the host writes and runs: `off` none unless asked, `light` (default) only for risky logic, `thorough` test-first with edge cases, regression tests and the full suite. Pin per project with `.claude/helm/testing` |
+| `/helm:workload [off \| sometimes \| always]` | Hand work to cheaper sub agents (haiku or sonnet): `sometimes` (default) for mechanical or independent units, `always` for all implementation, `off` for none. Pin per project with `.claude/helm/workload` |
 | `/helm:commit [--dry]` | Commit the staged changes: Conventional Commits subject, bulleted body, no attribution lines |
 | `/helm:help` | The full guide |
 

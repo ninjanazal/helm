@@ -1,6 +1,8 @@
 import { helmIsOn, deckCleared, deckMeasure, deckOpen, deckPrompt, deckStart, deckStep, deckTool, deckToolStart, deckTurnDone, registerDeck } from './deck'
 import type { Register } from 'claude-code'
 import { leanText, readLevel, LEAN_ID } from './lean'
+import { WORKLOAD_ID, workloadSection } from './workload'
+import { TESTING_ID, testingSection } from './testing'
 import { handleHelmTool, registerHelmTools, toolArgs } from './tools'
 
 /**
@@ -31,13 +33,18 @@ export const register: Register = (on, options) => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // Lean mode: one session-scope section appended to the system prompt. Falls through on any error.
+  // Lean mode, workload and testing: one session-scope section each appended to the system prompt. Falls through on any error.
   on('prompt.compose', async ($, e, next) => {
     const r = await next(e)
     if (!helmIsOn()) return r
-    const text = leanText(await readLevel($))
-    if (!text) return r
-    return { sections: [...r.sections.filter(s => s.id !== LEAN_ID), { id: LEAN_ID, text, scope: 'session' as const }] }
+    const lean = leanText(await readLevel($))
+    const workload = await workloadSection($)
+    const testing = await testingSection($)
+    const sections = r.sections.filter(s => s.id !== LEAN_ID && s.id !== WORKLOAD_ID && s.id !== TESTING_ID)
+    if (lean) sections.push({ id: LEAN_ID, text: lean, scope: 'session' as const })
+    if (workload) sections.push({ id: WORKLOAD_ID, text: workload, scope: 'session' as const })
+    sections.push({ id: TESTING_ID, text: testing, scope: 'session' as const })
+    return { sections }
   }).catch(($, e, next) => next(e))
 
   on('prompt.submit', async ($, e, next) => {

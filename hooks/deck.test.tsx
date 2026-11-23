@@ -3,7 +3,7 @@ import { fmtDur, addCtx, addFive, agentDone, agentStep, applyStep, applyTodo, ba
 import type { DeckData, FiveSample } from './deck-core'
 
 const data = (x: Partial<DeckData> = {}): DeckData => ({
-  task: 'Add GDScript support to the parser', taskAt: 0, turns: 12, model: 'opus-5-5', effort: 'medium', branch: 'main', dirty: 3,
+  task: 'Add GDScript support to the parser', taskAt: 0, turns: 12, model: 'opus-5-5', effort: 'medium', branch: 'main', changes: { files: 3, added: 40, removed: 7 },
   ctx: { tokens: 118000, window: 200000, percent: 59 }, limits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: 3 * 3600 }],
   compactions: 1, cost: 4.8, tokens: { input: 1000, output: 2000, cacheRead: 9000, cacheWrite: 1000 },
   touched: [{ path: 'hooks/deck.tsx', edited: true }, { path: 'hooks/tools.ts', edited: false }, { path: 'src/parser/query.rs', edited: false }],
@@ -65,7 +65,7 @@ test('deck: every section, fits the width, animates only while running', () => {
   expect(fresh).not.toContain('tokens 0')
   expect(fresh).toContain('your next prompt becomes the task')
   // tokens: in = input + cache writes, out = output; no $/h rate
-  expect(t).toContain('$4.80 · 4.0k tok')
+  expect(t).toContain('$4.80 · in 2.0k · out 2.0k')
   expect(t).not.toContain('/h')
   expect(t).not.toContain('rate ')
   const big = text(deck(data({ tokens: { input: 1000, output: 2000, cacheRead: 1_400_000, cacheWrite: 1000 } }), 46, 0, now))
@@ -77,14 +77,26 @@ test('deck: every section, fits the width, animates only while running', () => {
 })
 
 test('task: goal, now, model / effort / lean chips, then the facts wrapped without cutting an item', () => {
-  const [top, nowRow, ...rest] = deck(data(), 30, 0, 3.6e6)[0]!.body.map(l => l.map(s => s.t).join(''))
+  const [top, ...rest] = deck(data(), 30, 0, 3.6e6)[0]!.body.map(l => l.map(s => s.t).join(''))
   expect(top).toContain('Add GDScript')
-  expect(nowRow).toBe('○ idle')
-  expect(rest.join('|')).toBe(' opus-5-5  ▰▰▱▱ medium|1h 00m · 12 turns · ⎇ main ±3|✎ 1 edited 2 read')
-  const tool = deck(data({ running: true, phase: { kind: 'tool', verb: 'editing', target: 'hooks/deck.tsx' } }), 40, 0, 3.6e6)[0]!.body[1]!
-  expect(tool.map(s => s.t).join('')).toBe('✎ editing hooks/deck.tsx')
+  expect(rest.join('|')).toBe(' opus-5-5  ▰▰▱▱ medium||1h 00m · 12 turns · ⎇ main|3 files +40 −7|✎ 1 edited 2 read')
+  // the live state is not repeated in the task section
+  const busy = deck(data({ running: true, phase: { kind: 'tool', verb: 'editing', target: 'hooks/deck.tsx' } }), 40, 0, 3.6e6)[0]!.body.map(l => l.map(s => s.t).join(''))
+  expect(busy.join('|')).not.toMatch(/editing|idle|writing/)
   // the model chip is a fill in a theme colour
-  expect(deck(data(), 40, 0, 3.6e6)[0]!.body[2]![0]).toMatchObject({ t: ' opus-5-5 ', bg: 'claude' })
+  expect(deck(data(), 40, 0, 3.6e6)[0]!.body[1]![0]).toMatchObject({ t: ' opus-5-5 ', bg: 'claude' })
+})
+
+test('focus: the task keywords, and why it drifts only once it does', () => {
+  const rows = (x: object, w = 60) => deck(data(x), w, 0, 3.6e6).find(s => s.id === 'focus')!.body.map(l => l.map(s => s.t).join(''))
+  const base = { taskTerms: ['gdscript', 'deck', 'tool', 'chart', 'extra'], recent: [['deck', 'invoice', 'billing']], turns: 9 }
+  expect(rows({ ...base, drift: drift(10, 0, 2) })[1]).toBe('Working on: gdscript, deck, tool, chart, extra.')
+  expect(rows({ ...base, drift: drift(10, 0, 2) })).toHaveLength(2)
+  expect(rows({ ...base, drift: drift(95, 0.5, 2) }).slice(2).join(' ')).toBe('Drifting: the context is 95% full; recent prompts are about invoice, billing, not the task.')
+  expect(rows({ ...base, drift: drift(50, 1, 2) }).slice(2).join(' ')).toBe('Drifting: recent prompts are about invoice, billing, not the task; the context is 50% full.')
+  expect(rows({ ...base, drift: drift(30, 0.6, 60) }).slice(2).join(' ')).toBe('Drifting: 9 turns on this task; recent prompts are about invoice, billing, not the task; the context is 30% full.')
+  // no task yet: no focus line
+  expect(rows({ taskTerms: [], drift: drift(10, 0, 2) })).toHaveLength(1)
 })
 
 test('marquee: fits as is; too long scrolls while running, is cut with … when idle', () => {
@@ -305,11 +317,35 @@ test('todo section: counts, states, hidden without a list', () => {
 test('turns: no turns section; the header shows the lean level next to effort', () => {
   expect(deck(data({ history: HIST }), 50, 0, 3.6e6).some(x => x.id === 'turns')).toBe(false)
   const head = (lean?: 'off' | 'lite' | 'full') => text(deck(data({ lean }), 60, 0, 3.6e6).slice(0, 1))
-  // lean shows its three levels; the stored one is filled
-  const chip = (lean: 'off' | 'lite' | 'full') => deck(data({ lean }), 60, 0, 3.6e6)[0]!.body.flat().filter(s => s.bg === 'success').map(s => s.t.trim())
-  expect(head('full')).toContain('medium lean  off  lite  full')
+  // lean is a bar like effort's: ▰ cells grow with the level, then its name
+  const chip = (lean: 'off' | 'lite' | 'full') => deck(data({ lean }), 60, 0, 3.6e6)[0]!.body.flat().filter(s => s.c === 'success' && s.b).map(s => s.t.trim())
+  expect(head('full')).toContain('lean ▰▰ full')
+  expect(head('lite')).toContain('lean ▰▱ lite')
+  expect(head('off')).toContain('lean ▱▱ off')
+  expect(deck(data({ lean: 'full' }), 60, 0, 3.6e6)[0]!.body.map(l => l.map(s => s.t).join('')).some(l => l.includes('medium') && l.includes('lean'))).toBe(false)
   for (const l of ['off', 'lite', 'full'] as const) expect(chip(l)).toEqual([l])
   expect(head()).not.toContain('lean')
+})
+
+test('task: lean and workload share a line, wrapping when narrow', () => {
+  const rows = deck(data({ lean: 'full', workload: 'always' }), 60, 0, 3.6e6)[0]!.body
+  const line = (k: string) => rows.find(l => l.map(s => s.t).join('').trim().startsWith(k))!
+  expect(line('lean').map(s => s.t).join('').trim()).toBe('lean ▰▰ full  workload ▰▰ always')
+  expect(line('lean').filter(s => s.c === 'success' && s.b).map(s => s.t.trim())).toEqual(['full', 'always'])
+  // too narrow for both: workload wraps to its own line
+  const narrow = deck(data({ lean: 'full', workload: 'always' }), 30, 0, 3.6e6)[0]!.body.map(l => l.map(s => s.t).join('').trim())
+  expect(narrow).toContain('lean ▰▰ full')
+  expect(narrow.some(l => l.startsWith('workload'))).toBe(true)
+  expect(deck(data(), 60, 0, 3.6e6)[0]!.body.some(l => l.map(s => s.t).join('').includes('workload'))).toBe(false)
+})
+
+test('task: testing joins the settings row, wraps when narrow, absent when unset', () => {
+  const text = (w: number, d = data({ lean: 'full', workload: 'always', testing: 'thorough' })) => deck(d, w, 0, 3.6e6)[0]!.body.map(l => l.map(s => s.t).join('').trim())
+  expect(text(80)).toContain('lean ▰▰ full  workload ▰▰ always  testing ▰▰ thorough')
+  const narrow = text(30)
+  expect(narrow.some(l => l.startsWith('testing'))).toBe(true)
+  expect(narrow.some(l => l.startsWith('lean') && l.includes('testing'))).toBe(false)
+  expect(text(80, data({ lean: 'full' })).some(l => l.includes('testing'))).toBe(false)
 })
 
 test('brailleLine: exact cells for flat, rising, drop, multi-row, partial and clamped', () => {
@@ -353,21 +389,19 @@ test('series: 5h per minute, resets with its window', () => {
   expect(k.fiveSeries.length).toBe(3)
 })
 
-test('usage: context trail and 5h braille chart', () => {
+test('usage: context bar without a trail, and the 5h braille chart', () => {
   const ser = { ctxSeries: [20, 30, 45, 59], fiveSeries: [0, 5, 10, 15, 20, 25, 30, 35, 40, 42].map((pct, i) => ({ at: i * 60_000, pct })) }
   const rows = (w: number, x = {}) => deck(data({ ...ser, ...x }), w, 0, 3.6e6).find(s => s.id === 'usage')!.body.map(l => l.map(s => s.t).join(''))
   const B = /[⠁-⣿]/
   const u = rows(46)
-  expect(u[0]).toMatch(/^context .*59%.*[⠁-⣿]/)
+  expect(u[0]).toMatch(/^context .*59%/)
+  expect(u[0]).not.toMatch(B)
   expect(u[1]).toMatch(/^5h +42% +↻/)
   expect(u.slice(2, 5).every(r => r.length === 46)).toBe(true)
   expect(u.slice(2, 5).some(r => B.test(r))).toBe(true)
   expect(u.length).toBeLessThanOrEqual(8)
   expect(rows(46, { limits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: 3 * 3600 }, { kind: 'seven_day', percentUsed: 23, resetsAt: 5 * 3600 }] }).length).toBeLessThanOrEqual(8)
-  // exactly 2 context samples already draw a trail
-  expect(rows(46, { ctxSeries: [20, 59] })[0]).toMatch(/[⠁-⣿]/)
   for (const r of u) expect([...r].length).toBeLessThanOrEqual(46)
-  expect(u[0]!.match(/59% ⟲( +)[⠁-⣿]/)![1]!.length).toBeLessThanOrEqual(2)
   expect(rows(46, { limits: [{ kind: 'five_hour', percentUsed: 42 }] })[1]).not.toContain('↻')
   // narrow panes: the context bar keeps its 4-cell floor (the trail yields), and the value is not clipped away
   for (let w = 12; w <= 16; w++) {
