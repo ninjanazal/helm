@@ -4,9 +4,11 @@
 
 helm is a Claude Code plugin:
 
-- **Deck pane:** the session's health beside the chat. A header with the task, time, turns, model, effort, lean level and branch; a focus meter (drift: time for a fresh session?); usage: a context meter with a braille trail of recent turns, a braille chart of the 5h limit with its reset countdown, a weekly meter, and cost and tokens; and a row per sub agent with its own tokens and clock. Colours follow your theme, light or dark. It animates only while a turn runs.
+- **Deck pane:** the session's health beside the chat, in tabs. Task: the goal, model and effort, the lean, workload and testing levels, time, turns, branch, the files changed with lines added and removed vs HEAD, and files edited and read. Focus: a drift gauge, a sentence on what the task is about and, once it drifts, a warning that says why. Usage: a context meter with a braille trail of recent turns, a braille chart of the 5h limit with its reset countdown, a weekly meter, cost, and tokens in and out. Agents: a row per sub agent with its own tokens and clock. Below, a live timeline. Colours follow your theme, light or dark. It animates only while a turn runs.
 - **`/helm:prompt`:** turns a rough request into a complete, checkable prompt (goal, grounded context, scope, acceptance checks, stop conditions) and saves it as the current task once approved.
 - **Lean mode:** on by default, a short system-prompt section that cuts output tokens. `/helm:lean off` turns it off. Ideas from ponytail and caveman, written natively.
+- **Testing:** `/helm:testing` sets how much testing the host writes and runs: `off` (none unless asked), `light` (default, only for risky logic) or `thorough` (test-first, edge cases, a regression test per bug, the full suite). Like lean, it applies from the next session, `/clear` or compaction, and a project can pin it in `.claude/helm/testing`.
+- **Workload:** `/helm:workload` sets how much work the host hands to cheaper sub agents: `off`, `sometimes` (default, only mechanical or independent units) or `always` (the host plans and reviews, sub agents implement). It applies the same way and pins in `.claude/helm/workload`.
 - **superpowers** (workflow skills) is installed with helm as a plugin dependency; helm's prompt and commit skills route to it and work without it.
 
 ## 📦 Install
@@ -36,7 +38,7 @@ rm -rf .claude/helm/tasks .claude/helm/team.json
 ## 🧭 Deck
 
 - `/helm:switch` opens the pane; `/helm:switch on|off` turns helm (the deck and lean mode) on or off for the project; off survives `/clear` and new sessions. Each approved `/helm:prompt` re-anchors the task and resets drift.
-- Drift = 0.4 × context fill + 0.4 × topic shift (new terms vs. the task's first prompt) + 0.2 × turns/60. At 0.70 it suggests a fresh session.
+- Drift = 0.4 × context fill + 0.4 × topic shift (new terms vs. the task's first prompt) + 0.2 × turns/60. From 0.50 the Focus tab warns and names the causes (context fill, recent prompts off the task, turn count); at 0.70 it suggests a fresh session.
 - Every number comes from the engine or git; cost is the engine's own estimate.
 
 ## ⌨️ Commands
