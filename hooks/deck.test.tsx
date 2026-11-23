@@ -375,6 +375,7 @@ test('usage: context trail and 5h braille chart', () => {
   for (const r of u) expect([...r].length).toBeLessThanOrEqual(46)
   expect(u[0]!.match(/59% ⟲( +)[⠁-⣿]/)![1]!.length).toBeLessThanOrEqual(2)
   expect(rows(46, { limits: [{ kind: 'five_hour', percentUsed: 42 }] })[1]).not.toContain('↻')
+  for (let w = 12; w <= 16; w++) for (const r of rows(w)) expect([...r].length).toBeLessThanOrEqual(w)
   const n = rows(32)
   expect(n[1]).not.toContain('↻')
   // two chart rows at narrow widths; 0-42% only reaches the lower one

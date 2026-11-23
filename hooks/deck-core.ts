@@ -239,7 +239,7 @@ function meter(label: string, p: number, w: number, c: string, value: Line, mark
     // value unpadded, the trail right beside it; the bar takes the slack but keeps 4 cells, so the trail is capped to fit
     const room = w - lw - 4 - 1 - len(value) - 1
     const tr = trail.trimStart()
-    const t = tr.slice(-Math.min(tr.length, Math.max(0, room)))
+    const t = room > 0 ? tr.slice(-room) : ''
     if (t.length >= 2) return [{ t: name.padEnd(lw), d: true }, ...bar(p, w - lw - 1 - len(value) - 1 - t.length, c, mark), { t: ' ' }, ...value, { t: ' ' }, { t: t, c }]
   }
   const bw = Math.max(4, w - lw - 1 - vw)
