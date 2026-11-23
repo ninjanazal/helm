@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { addCtx, addFive, agentDone, agentStep, applyStep, applyTodo, parseChecks, bar, brailleLine, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
+import { fmtDur, addCtx, addFive, agentDone, agentStep, applyStep, applyTodo, parseChecks, bar, brailleLine, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
 import type { DeckData, FiveSample } from './deck-core'
 
 const data = (x: Partial<DeckData> = {}): DeckData => ({
@@ -73,6 +73,7 @@ test('deck: every section, fits the width, animates only while running', () => {
   // a weekly limit gets its own meter and reset countdown
   const wk = text(deck(data({ limits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: 3 * 3600 }, { kind: 'seven_day', percentUsed: 23, resetsAt: 5 * 3600 }] }), 46, 0, now))
   expect(wk).toContain('23% ↻4h 00m')
+  expect(fmtDur((145 * 60 + 17) * 60_000)).toBe('6d 1h')
 })
 
 test('header: topic first, then time, turns, model, effort and branch, wrapped without cutting an item', () => {
@@ -369,7 +370,7 @@ test('series: 5h per minute, resets with its window', () => {
 })
 
 test('usage: context trail and 5h braille chart', () => {
-  const ser = { ctxSeries: [20, 30, 45, 59], fiveSeries: [0, 10, 20, 30, 42].map((pct, i) => ({ at: i * 60_000, pct })) }
+  const ser = { ctxSeries: [20, 30, 45, 59], fiveSeries: [0, 5, 10, 15, 20, 25, 30, 35, 40, 42].map((pct, i) => ({ at: i * 60_000, pct })) }
   const rows = (w: number, x = {}) => deck(data({ ...ser, ...x }), w, 0, 3.6e6).find(s => s.id === 'usage')!.body.map(l => l.map(s => s.t).join(''))
   const B = /[⠁-⣿]/
   const u = rows(46)
@@ -401,6 +402,10 @@ test('usage: context trail and 5h braille chart', () => {
   const few = rows(46, { ctxSeries: [59], fiveSeries: [{ at: 0, pct: 42 }] })
   expect(few.some(r => B.test(r))).toBe(false)
   expect(few.some(r => /^5h .*42%/.test(r))).toBe(true)
+  // under ten minutes of 5h samples: the meter, not a near-empty chart
+  const early = rows(46, { fiveSeries: ser.fiveSeries.slice(0, 9) })
+  expect(early.some(r => /^5h .*▆.*42%/.test(r))).toBe(true)
+  expect(early.slice(1).some(r => B.test(r))).toBe(false)
   // no 5h limit (API key): no 5h block
   expect(rows(46, { limits: [] }).some(r => r.startsWith('5h'))).toBe(false)
 })

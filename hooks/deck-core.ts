@@ -65,6 +65,7 @@ export function fmtTok(n: number): string {
 
 export function fmtDur(ms: number): string {
   const m = Math.max(0, Math.round(ms / 60000))
+  if (m >= 1440) return `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`
   return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`
 }
 
@@ -85,6 +86,9 @@ export function addCtx(series: number[] | undefined, pct: number | undefined): n
 export type FiveSample = { at: number; pct: number }
 
 /** The 5h usage, one sample a minute: a sample within a minute of the last updates its pct and keeps its minute; a moved reset time (a new 5h window) starts the series over, an absent one keeps it. */
+/** The 5h chart needs about ten minutes of samples (one a minute); until then the plain meter shows. */
+export const FIVE_CHART_MIN = 10
+
 export function addFive(series: FiveSample[] | undefined, windowAt: number | undefined, pct: number | undefined, resetsAt: string | number | undefined, at: number): { fiveSeries: FiveSample[]; fiveAt?: number } {
   const r = resetMs(resetsAt)
   const fresh = r !== undefined && (windowAt === undefined || Math.abs(r - windowAt) > 60_000)
@@ -354,7 +358,7 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   }
   const five = d.limits.find(l => /five|5h/i.test(l.kind))
   const fs = d.fiveSeries ?? []
-  if (five && fs.length >= 2) {
+  if (five && fs.length >= FIVE_CHART_MIN) {
     const r = resetMs(five.resetsAt)
     const c = level(five.percentUsed)
     body.push([{ t: '5h'.padEnd(narrow ? 5 : 8), d: true }, { t: `${Math.round(five.percentUsed)}%`, c, b: true }, ...(narrow || !r || r <= now ? [] : [{ t: '  ↻' + fmtDur(r - now), d: true }])])
