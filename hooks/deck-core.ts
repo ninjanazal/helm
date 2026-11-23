@@ -33,6 +33,10 @@ export type DeckData = {
   checks?: DeckCheck[]
   todos?: DeckTodo[]
   ctxParts?: { name: string; tokens: number }[]
+  ctxSeries?: number[]
+  fiveSeries?: FiveSample[]
+  /** The current 5h window's reset time, ms. */
+  fiveAt?: number
   drift: Drift
   feed: FeedItem[]
   running: boolean
@@ -67,6 +71,28 @@ function resetMs(r: string | number | undefined): number | undefined {
   if (r === undefined) return undefined
   const v = typeof r === 'number' ? (r < 1e12 ? r * 1000 : r) : Date.parse(r)
   return Number.isFinite(v) ? v : undefined
+}
+
+export const SERIES_CAP = 120
+
+/** The context % after each turn, newest last, at most SERIES_CAP; a non-finite pct adds nothing. */
+export function addCtx(series: number[] | undefined, pct: number | undefined): number[] {
+  const s = series ?? []
+  return pct === undefined || !Number.isFinite(pct) ? s : [...s, pct].slice(-SERIES_CAP)
+}
+
+export type FiveSample = { at: number; pct: number }
+
+/** The 5h usage, one sample a minute (a nearer one replaces the last); a new window (its reset moved) starts the series over. */
+export function addFive(series: FiveSample[] | undefined, windowAt: number | undefined, pct: number | undefined, resetsAt: string | number | undefined, at: number): { fiveSeries: FiveSample[]; fiveAt?: number } {
+  const r = resetMs(resetsAt)
+  const fresh = windowAt === undefined || (r !== undefined && Math.abs(r - windowAt) > 60_000)
+  const fiveAt = fresh ? r : windowAt
+  const base = fresh ? [] : (series ?? [])
+  if (pct === undefined || !Number.isFinite(pct)) return { fiveSeries: base, fiveAt }
+  const last = base.at(-1)
+  const next = last && at - last.at < 60_000 ? [...base.slice(0, -1), { at, pct }] : [...base, { at, pct }]
+  return { fiveSeries: next.slice(-SERIES_CAP), fiveAt }
 }
 
 /** At the pace since `since`, when the window would hit 100%, or undefined if that is after its reset. */

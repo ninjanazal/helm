@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import { DRIFT_AT, PANE_FRAME_MS, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, layout, terms, tokenSplit, topicShift, verdict } from './deck-core'
+import { DRIFT_AT, PANE_FRAME_MS, addCtx, addFive, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, layout, terms, tokenSplit, topicShift, verdict } from './deck-core'
 import type { DeckData, FeedItem, StepUsage } from './deck-core'
 import type { DeckCheck, DeckDone, DeckState } from '../types'
 
@@ -66,8 +66,10 @@ async function poll($: EngineInterface) {
   })
 }
 
+const ctxPct = (s: DeckState) => s.ctx?.percent ?? (s.ctx?.tokens ? (100 * s.ctx.tokens) / s.ctx.window : 0)
+
 function view(s: DeckState): DeckData {
-  const pct = s.ctx?.percent ?? (s.ctx?.tokens ? (100 * s.ctx.tokens) / s.ctx.window : 0)
+  const pct = ctxPct(s)
   const recent = new Set(s.recent.flat())
   return {
     ...s,
@@ -197,10 +199,10 @@ export async function deckTurnDone($: EngineInterface, e: { agentId?: string }) 
   const cost = await $.session.usage().then(u => u.cost?.usd).catch(() => undefined)
   await quiet(() => set($, s => {
     const n = s.turns + 1
-    if (!s.cur) return { ...s, turns: n, cost: cost ?? s.cost }
+    if (!s.cur) return { ...s, turns: n, cost: cost ?? s.cost, ctxSeries: addCtx(s.ctxSeries, ctxPct(s)) }
     const spent = cost !== undefined && s.cur.cost0 !== undefined ? Math.max(0, cost - s.cur.cost0) : undefined
     const done: DeckDone = { n, seq: s.cur.seq, tok: totalTok(s) - s.cur.tok0, ms: now - s.cur.at, ...verdict(s.cur), ask: s.cur.ask, cost: spent }
-    return { ...s, turns: n, cost: cost ?? s.cost, curDone: true, history: [...(s.history ?? []), done].slice(-8) }
+    return { ...s, turns: n, cost: cost ?? s.cost, curDone: true, history: [...(s.history ?? []), done].slice(-8), ctxSeries: addCtx(s.ctxSeries, ctxPct(s)) }
   }))
   await quiet(() => update($, frame, f => f + 1))
 }
@@ -224,7 +226,11 @@ export async function deckStep($: EngineInterface, e: { agentId?: string; model:
 
 export async function deckMeasure($: EngineInterface, e: { context: DeckState['ctx']; rateLimits?: unknown }) {
   const rl = Array.isArray(e.rateLimits) ? (e.rateLimits as { kind: string; percentUsed: number; resetsAt?: string }[]) : []
-  await quiet(() => set($, s => ({ ...s, ctx: e.context, limits: rl.map(r => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt })) })))
+  const at = await $.clock.now()
+  await quiet(() => set($, s => {
+    const l = rl.find(r => /five|5h/i.test(r.kind))
+    return { ...s, ctx: e.context, limits: rl.map(r => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt })), ...addFive(s.fiveSeries, s.fiveAt, l?.percentUsed, l?.resetsAt, at) }
+  }))
 }
 
 export async function deckTool($: EngineInterface, e: { tool: string; agentId?: string }, r: unknown) {
@@ -341,7 +347,7 @@ export async function deckCheck($: EngineInterface, n: unknown, state: unknown):
 }
 
 export async function deckReset($: EngineInterface): Promise<string> {
-  await set($, s => ({ ...blank(), ctx: s.ctx, limits: s.limits, cost: s.cost, startedAt: s.startedAt }))
+  await set($, s => ({ ...blank(), ctx: s.ctx, limits: s.limits, fiveSeries: s.fiveSeries, fiveAt: s.fiveAt, cost: s.cost, startedAt: s.startedAt }))
   return 'Deck reset.'
 }
 

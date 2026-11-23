@@ -44,6 +44,12 @@ export type DeckState = {
   todos?: DeckTodo[]
   /** What fills the context window: the /context categories in use, largest first. */
   ctxParts?: { name: string; tokens: number }[]
+  /** The context % after each turn, newest last, at most 120. */
+  ctxSeries?: number[]
+  /** The 5h usage, a sample a minute, reset with its window. */
+  fiveSeries?: { at: number; pct: number }[]
+  /** The current 5h window's reset time, ms. */
+  fiveAt?: number
   /** The prompt that starts the next turn, first line. */
   ask?: string
   feed: { at: number; kind: 'find' | 'read' | 'edit' | 'run' | 'test' | 'topic' | 'note'; text: string; note?: string; tone?: 'good' | 'bad' | 'warn' | 'dim' }[]

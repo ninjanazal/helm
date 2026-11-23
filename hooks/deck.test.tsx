@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { agentDone, agentStep, applyStep, applyTodo, parseChecks, stackBar, bar, brailleLine, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
-import type { DeckData } from './deck-core'
+import { addCtx, addFive, agentDone, agentStep, applyStep, applyTodo, parseChecks, stackBar, bar, brailleLine, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
+import type { DeckData, FiveSample } from './deck-core'
 
 const data = (x: Partial<DeckData> = {}): DeckData => ({
   task: 'Add GDScript support to the parser', taskAt: 0, turns: 12, model: 'opus-5-5', effort: 'medium', branch: 'main', dirty: 3,
@@ -342,4 +342,27 @@ test('brailleLine: exact cells for flat, rising, drop, multi-row, partial and cl
   expect(brailleLine([], 2, 1)).toEqual(['  '])
   expect(brailleLine([150, 150], 1, 1)).toEqual(['⠉']) // clamped to max
   expect(brailleLine([0, 10, 20, 30, 40, 50, 60, 70, 80, 90], 3, 1)).toEqual(['⠔⠒⠊']) // last 2·w only
+})
+
+test('series: context per turn, capped', () => {
+  let c: number[] = []
+  for (let i = 0; i < 130; i++) c = addCtx(c, i % 100)
+  expect(c.length).toBe(120)
+  expect(c.at(-1)).toBe(29)
+  expect(addCtx([5], NaN)).toEqual([5])
+})
+
+test('series: 5h per minute, resets with its window', () => {
+  const R = 1.8e12 // epoch ms (resetMs reads numbers under 1e12 as seconds)
+  let f = addFive(undefined, undefined, 10, R, 0)
+  f = addFive(f.fiveSeries, f.fiveAt, 11, R + 2000, 30_000) // jitter, same minute: replaced
+  expect(f.fiveSeries).toEqual([{ at: 30_000, pct: 11 }])
+  f = addFive(f.fiveSeries, f.fiveAt, 12, R, 90_000) // a new minute: appended
+  expect(f.fiveSeries.map(x => x.pct)).toEqual([11, 12])
+  f = addFive(f.fiveSeries, f.fiveAt, 1, R + 5 * 3.6e6, 200_000) // a new window: reset
+  expect(f.fiveSeries).toEqual([{ at: 200_000, pct: 1 }])
+  let g = { fiveSeries: [] as FiveSample[], fiveAt: R as number | undefined }
+  for (let i = 0; i < 130; i++) g = addFive(g.fiveSeries, g.fiveAt, i % 100, R, i * 60_000)
+  expect(g.fiveSeries.length).toBe(120)
+  expect(addFive([{ at: 0, pct: 3 }], R, undefined, R, 120_000).fiveSeries).toEqual([{ at: 0, pct: 3 }])
 })
