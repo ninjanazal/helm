@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { agentDone, agentStep, applyStep, applyTodo, parseChecks, stackBar, bar, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
+import { agentDone, agentStep, applyStep, applyTodo, parseChecks, stackBar, bar, brailleLine, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
 import type { DeckData } from './deck-core'
 
 const data = (x: Partial<DeckData> = {}): DeckData => ({
@@ -331,4 +331,15 @@ test('context: the meter is stacked by what fills it, with a legend; the small p
   expect(u.join('|')).toContain('■ system prompt 9.0k')
   expect(u.join('|')).toContain('■ other 5.0k')
   expect(u.join('|')).not.toContain('memory files')
+})
+
+test('brailleLine: exact cells for flat, rising, drop, multi-row, partial and clamped', () => {
+  expect(brailleLine([50, 50, 50, 50], 2, 1)).toEqual(['⠒⠒'])
+  expect(brailleLine([0, 100], 1, 1)).toEqual(['⡜'])
+  expect(brailleLine([100, 0], 1, 1)).toEqual(['⢣']) // compaction / reset drop
+  expect(brailleLine([0, 100], 1, 2)).toEqual(['⢸', '⡇'])
+  expect(brailleLine([0, 100], 2, 1)).toEqual([' ⡜']) // newest at the right edge
+  expect(brailleLine([], 2, 1)).toEqual(['  '])
+  expect(brailleLine([150, 150], 1, 1)).toEqual(['⠉']) // clamped to max
+  expect(brailleLine([0, 10, 20, 30, 40, 50, 60, 70, 80, 90], 3, 1)).toEqual(['⠔⠒⠊']) // last 2·w only
 })

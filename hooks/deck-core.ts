@@ -141,6 +141,32 @@ export function bar(p: number, w: number, c: string, mark?: number): Line {
   return merge(out)
 }
 
+const BRAILLE = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]]
+
+/** A braille line chart, `h` rows of `w` cells, top row first: the newest of `values` at the right edge, scaled 0..max. */
+export function brailleLine(values: number[], w: number, h: number, max = 100): string[] {
+  const pw = w * 2, ph = h * 4
+  const bits = new Array<number>(w * h).fill(0)
+  const set = (x: number, y: number) => {
+    x = Math.round(x)
+    y = Math.round(y)
+    if (x < 0 || y < 0 || x >= pw || y >= ph) return
+    bits[(y >> 2) * w + (x >> 1)] |= BRAILLE[x & 1][y & 3]
+  }
+  const yOf = (p: number) => ph - 1 - Math.round((Math.min(max, Math.max(0, p)) / max) * (ph - 1))
+  const v = values.slice(-pw)
+  const x0 = pw - v.length
+  v.forEach((p, i) => {
+    const y = yOf(p)
+    if (!i) return set(x0, y)
+    const px = x0 + i - 1, py = yOf(v[i - 1])
+    const n = Math.max(1, Math.abs(y - py))
+    for (let k = 0; k <= n; k++) set(px + k / n, py + ((y - py) * k) / n)
+  })
+  return Array.from({ length: h }, (_, r) =>
+    Array.from({ length: w }, (_, c) => (bits[r * w + c] ? String.fromCharCode(0x2800 + bits[r * w + c]) : ' ')).join(''))
+}
+
 function merge(l: Line): Line {
   const out: Line = []
   for (const s of l) {
