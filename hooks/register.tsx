@@ -1,4 +1,4 @@
-import { helmIsOn, deckCleared, deckMeasure, deckOpen, deckPrompt, deckStart, deckStep, deckTool, deckTurnDone, registerDeck } from './deck'
+import { helmIsOn, deckCleared, deckMeasure, deckOpen, deckPrompt, deckStart, deckStep, deckTool, deckToolStart, deckTurnDone, registerDeck } from './deck'
 import type { Register } from 'claude-code'
 import { leanText, readLevel, LEAN_ID } from './lean'
 import { handleHelmTool, registerHelmTools, toolArgs } from './tools'
@@ -56,6 +56,7 @@ export const register: Register = (on, options) => {
       const mine = await handleHelmTool($, e.tool, toolArgs(e))
       if (mine !== undefined) return mine as never
     }
+    deckToolStart(e)
     const res = await next(e)
     await deckTool($, e, res)
     return res

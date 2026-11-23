@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { fmtDur, addCtx, addFive, agentDone, agentStep, applyStep, applyTodo, bar, brailleLine, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
+import { fmtDur, addCtx, addFive, agentDone, agentStep, applyStep, applyTodo, bar, brailleLine, isDeckOn, deck, pipeline, toolPhase, live, marquee, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
 import type { DeckData, FiveSample } from './deck-core'
 
 const data = (x: Partial<DeckData> = {}): DeckData => ({
@@ -49,9 +49,9 @@ test('deck: every section, fits the width, animates only while running', () => {
   const ses = wk0.find(x => x.id === 'usage')!.body.filter(l => l[0]?.t.trim() === 'context' || l[0]?.t.trim() === 'week')
   expect(ses.length).toBe(2)
   expect(new Set(ses.map(l => l.map(x => x.t).join('').indexOf(' ', 9 + 20))).size).toBe(1)
-  // the header has no title; a section is live only while work flows in it and a turn runs
+  // the task section has a tab; a section is live only while work flows in it and a turn runs
   expect(on[0]!.id).toBe('head')
-  expect(on[0]!.title).toBe('')
+  expect(on[0]!.title).toBe('▣ TASK')
   expect(on.filter(x => x.live).map(x => x.id)).toEqual([])
   const work = deck(data({ agents: [agent('a')], todos: [{ text: 'x', state: 'working' }] }), 46, 7, now)
   expect(work.filter(x => x.live).map(x => x.id)).toEqual(['agents', 'todo'])
@@ -76,10 +76,37 @@ test('deck: every section, fits the width, animates only while running', () => {
   expect(fmtDur((145 * 60 + 17) * 60_000)).toBe('6d 1h')
 })
 
-test('header: topic first, then time, turns, model, effort and branch, wrapped without cutting an item', () => {
-  const [top, ...rest] = deck(data(), 30, 0, 3.6e6)[0]!.body.map(l => l.map(s => s.t).join(''))
+test('task: goal, now, model / effort / lean chips, then the facts wrapped without cutting an item', () => {
+  const [top, nowRow, ...rest] = deck(data(), 30, 0, 3.6e6)[0]!.body.map(l => l.map(s => s.t).join(''))
   expect(top).toContain('Add GDScript')
-  expect(rest.join('|')).toBe('1h 00m · 12 turns · opus-5-5|medium · ⎇ main ±3|✎ 1 edited 2 read')
+  expect(nowRow).toBe('○ idle')
+  expect(rest.join('|')).toBe(' opus-5-5  ▰▰▱▱ medium|1h 00m · 12 turns · ⎇ main ±3|✎ 1 edited 2 read')
+  const tool = deck(data({ running: true, phase: { kind: 'tool', verb: 'editing', target: 'hooks/deck.tsx' } }), 40, 0, 3.6e6)[0]!.body[1]!
+  expect(tool.map(s => s.t).join('')).toBe('✎ editing hooks/deck.tsx')
+  // the model chip is a fill in a theme colour
+  expect(deck(data(), 40, 0, 3.6e6)[0]!.body[2]![0]).toMatchObject({ t: ' opus-5-5 ', bg: 'claude' })
+})
+
+test('marquee: fits as is; too long scrolls while running, is cut with … when idle', () => {
+  expect(marquee('short', 10, 3, true)).toBe('short')
+  expect(marquee('a long goal that does not fit', 10, 0, false)).toBe('a long go…')
+  const a = marquee('a long goal that does not fit', 10, 0, true), b = marquee('a long goal that does not fit', 10, 4, true)
+  expect([...a].length).toBe(10)
+  expect(a).not.toBe(b)
+  expect(marquee('a long goal that does not fit', 10, 4, false)).toBe(marquee('a long goal that does not fit', 10, 0, false))
+})
+
+test('live: a tab, then a timeline (age │ what), running agents first, the feed newest first; nothing to list or short → []', () => {
+  const feed = [{ at: 0, kind: 'read' as const, text: 'deck.tsx' }, { at: 60_000, kind: 'edit' as const, text: 'deck-core.ts', tone: 'good' as const }]
+  const ls = live({ feed, agents: [agent('a')], running: true }, 40, 10, 0, 120_000).map(l => l.map(s => s.t).join(''))
+  expect(ls[0]).toContain('● live')
+  expect(ls[1]).toMatch(/^  now │ ⌁ /)
+  expect(ls[2]).toMatch(/^ +1m │ ✎ deck-core\.ts/)
+  expect(ls[3]).toMatch(/^ +2m │ ≡ deck\.tsx/)
+  for (const l of ls) expect([...l].length).toBeLessThanOrEqual(40)
+  expect(live({ feed, running: true }, 40, 4, 0, 0).length).toBe(4)
+  expect(live({ feed, running: true }, 40, 2, 0, 0)).toEqual([])
+  expect(live({ feed: [], running: true }, 40, 10, 0, 0)).toEqual([])
 })
 
 test('deck: fits 24, 40 and 80 columns with 0 or 2 agents; empty sections are absent; no checks section', () => {
@@ -145,11 +172,11 @@ test('a step is routed: sub-agent tokens go to the agent card, the main total co
   expect(s.agents).toEqual([{ id: 'a1', task: 'audit hooks', type: 'Explore', model: 'haiku-5-5', tokens: 320, steps: 2, startedAt: 10 }])
 })
 
-test('open layout: lower-case titles with a rule; the light sweeps only while running', () => {
+test('tab layout: lower-case filled title tabs with a rule; the light sweeps only while running', () => {
   const secs = deck(data({ agents: [agent('a')] }), 44, 7, 3.6e6)
   const on = layout(secs, 46, 7, true).map(l => l.map(s => s.t).join(''))
-  expect(on.some(l => l.startsWith('◇ focus ─'))).toBe(true)
-  expect(on.some(l => l.startsWith('⌁ agents · 1 running · 12k ─'))).toBe(true)
+  expect(on.some(l => l.startsWith(' ◇ focus  ─'))).toBe(true)
+  expect(on.some(l => l.startsWith(' ⌁ agents  1 running · 12k ─'))).toBe(true)
   expect(on.some(l => l.includes('/helm:'))).toBe(false)
   for (const l of on) expect([...l].length).toBeLessThanOrEqual(46)
   // the light moves along the agents rule over a few frames
@@ -171,7 +198,7 @@ test('verdict: tests decide, then whole-file reads, untested edits, no tools', (
 test('drift gauge: one row, the bar in its zone colour, a word for the zone; no scale', () => {
   const g = driftGauge(0.6, 46)
   expect(g.length).toBe(1)
-  expect(g[0]!.filter(x => x.t.includes('▆')).map(x => x.c)).toEqual(['warning', 'subtle'])
+  expect(g[0]!.filter(x => /[▰▱]/.test(x.t)).map(x => x.c)).toEqual(['warning', 'subtle'])
   expect(g[0]!.map(x => x.t).join('')).toContain('drifting')
   expect(driftGauge(0.8, 46)[0]!.map(x => x.t).join('')).toContain('start fresh')
   expect(driftGauge(0.2, 30)[0]!.map(x => x.t).join('')).toContain('ok')
@@ -278,9 +305,10 @@ test('todo section: counts, states, hidden without a list', () => {
 test('turns: no turns section; the header shows the lean level next to effort', () => {
   expect(deck(data({ history: HIST }), 50, 0, 3.6e6).some(x => x.id === 'turns')).toBe(false)
   const head = (lean?: 'off' | 'lite' | 'full') => text(deck(data({ lean }), 60, 0, 3.6e6).slice(0, 1))
-  expect(head('full')).toContain('medium · lean')
-  expect(head('lite')).toContain('lean lite')
-  expect(head('off')).not.toContain('lean')
+  // lean shows its three levels; the stored one is filled
+  const chip = (lean: 'off' | 'lite' | 'full') => deck(data({ lean }), 60, 0, 3.6e6)[0]!.body.flat().filter(s => s.bg === 'success').map(s => s.t.trim())
+  expect(head('full')).toContain('medium lean  off  lite  full')
+  for (const l of ['off', 'lite', 'full'] as const) expect(chip(l)).toEqual([l])
   expect(head()).not.toContain('lean')
 })
 
@@ -345,7 +373,7 @@ test('usage: context trail and 5h braille chart', () => {
   for (let w = 12; w <= 16; w++) {
     const c = rows(w)[0]!
     expect([...c].length).toBeLessThanOrEqual(w)
-    expect([...c].filter(ch => ch === '▆').length).toBeGreaterThanOrEqual(4)
+    expect([...c].filter(ch => ch === '▰' || ch === '▱').length).toBeGreaterThanOrEqual(4)
     if (w >= 13) expect(c).toContain('59%')
   }
   const n = rows(32)
@@ -360,8 +388,30 @@ test('usage: context trail and 5h braille chart', () => {
   expect(few.some(r => /^5h .*42%/.test(r))).toBe(true)
   // under ten minutes of 5h samples: the meter, not a near-empty chart
   const early = rows(46, { fiveSeries: ser.fiveSeries.slice(0, 9) })
-  expect(early.some(r => /^5h .*▆.*42%/.test(r))).toBe(true)
+  expect(early.some(r => /^5h .*▰.*42%/.test(r))).toBe(true)
   expect(early.slice(1).some(r => B.test(r))).toBe(false)
   // no 5h limit (API key): no 5h block
   expect(rows(46, { limits: [] }).some(r => r.startsWith('5h'))).toBe(false)
+})
+
+test('pipeline: each phase draws its own row, idle is still, short or narrow draws nothing', () => {
+  const THEME = new Set(['claude', 'success', 'warning', 'error', 'suggestion', 'subtle', undefined])
+  const BG = new Set(['claude', 'warning', 'suggestion', undefined])
+  const str = (ls: ReturnType<typeof pipeline>) => ls.map(l => l.map(s => s.t).join('')).join('\n')
+  const phases = [{ kind: 'thinking' as const }, toolPhase('Edit', { file_path: '/r/hooks/deck.tsx' }), { kind: 'waiting' as const }, { kind: 'idle' as const }]
+  const drawn = phases.map(p => pipeline(p, 6, 30, 3, 12_000))
+  expect(new Set(drawn.map(str)).size).toBe(4)
+  for (const ls of drawn) {
+    expect(ls.length).toBe(3)
+    for (const l of ls) { expect(len(l)).toBeLessThanOrEqual(30); for (const s of l) { expect(THEME.has(s.c)).toBe(true); expect(BG.has(s.bg)).toBe(true) } }
+  }
+  expect(str(drawn[0]!)).toContain('thinking · 12k this turn')
+  expect(str(drawn[1]!)).toContain('editing hooks/deck.tsx')
+  expect(str(drawn[1]!)).toContain('✎ editing')
+  expect(drawn[1]![0]!.find(s => s.bg)).toMatchObject({ bg: 'suggestion' })
+  expect(str(pipeline({ kind: 'idle' }, 0, 30, 3))).toBe(str(pipeline({ kind: 'idle' }, 77, 30, 3)))
+  expect(str(pipeline({ kind: 'thinking' }, 0, 30, 3))).not.toBe(str(pipeline({ kind: 'thinking' }, 2, 30, 3)))
+  expect(pipeline({ kind: 'thinking' }, 0, 30, 2)).toEqual([])
+  expect(pipeline({ kind: 'thinking' }, 0, 23, 3)).toEqual([])
+  expect(pipeline(toolPhase('Bash', { command: 'make check 2>&1' }), 0, 40, 3)[2]!.map(s => s.t).join('').trim()).toBe('⠋ testing make check')
 })

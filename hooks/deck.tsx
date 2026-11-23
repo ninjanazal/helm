@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import { DRIFT_AT, PANE_FRAME_MS, addCtx, addFive, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, layout, terms, tokenSplit, topicShift, verdict } from './deck-core'
-import type { DeckData, FeedItem, StepUsage } from './deck-core'
+import { DRIFT_AT, PANE_FRAME_MS, PIPE_ROWS, TEST_RE, addCtx, addFive, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, layout, live, pipeline, terms, tokenSplit, toolPhase, topicShift, verdict } from './deck-core'
+import type { DeckData, FeedItem, Phase, StepUsage } from './deck-core'
 import type { DeckDone, DeckState } from '../types'
 import { readLevel } from './lean'
 
@@ -17,6 +17,8 @@ const state_ = atom({ plugin: 'helm', key: 'deck' } as const, blank(), { shape: 
 const frame = atom({ plugin: 'helm', key: 'deckFrame' } as const, 0)
 
 let running = false
+/** What the main session is doing, for the pipeline; waiting is read at draw time from the pane's props. */
+let phase: Phase = { kind: 'idle' }
 let tickGen = 0
 /** Off (/helm:switch off): no auto-open, no reopen after /clear, no polling. */
 let deckIsOn = true
@@ -38,8 +40,6 @@ const quiet = async (fn: () => Promise<unknown>) => { try { await fn() } catch {
 function addFeed(s: DeckState, f: Omit<FeedItem, 'at'>, at: number): DeckState {
   return { ...s, feed: [...s.feed, { ...f, at }].slice(-20) }
 }
-
-const TEST_RE = /\b(make (test|check)|npm (run )?test|pnpm test|yarn test|bun test|cargo test|pytest|go test|claude plugin test)\b/
 
 async function poll($: EngineInterface) {
   const cwd = await $.session.cwd().catch(() => undefined)
@@ -79,6 +79,7 @@ export const registerDeck: Register = on => {
   on('turn.start', async ($, e, next) => {
     if (!(e as { agentId?: string }).agentId) {
       running = true
+      phase = { kind: 'thinking' }
       const now = await $.clock.now()
       await quiet(() => set($, s => ({ ...s, curDone: false, ask: undefined, cur: { ask: s.ask, cost0: s.cost, seq: '', at: now, tok0: totalTok(s), whole: 0, edits: 0 } })))
     }
@@ -104,12 +105,21 @@ export const registerDeck: Register = on => {
     const f = await read($, frame)
     const cols = e.props.bodyColumns
     const w = Math.max(24, cols - 2)
-    const lines = layout(deck(view(s), w - 1, f, await $.clock.now()), w, f, running)
+    const now = await $.clock.now()
+    const p: Phase = running && e.props.isPromptCovered ? { kind: 'waiting' } : running ? phase : { kind: 'idle' }
+    const v = { ...view(s), phase: p }
+    const lines = layout(deck(v, w - 1, f, now), w, f, running)
+    // the live list and the pipeline only in a docked pane's free rows: inline, the frame fits the tree, so no row is free
+    const free = e.props.placement === 'dock' ? (e.props.scroll?.bodyRows ?? 0) - lines.length : 0
+    const pipe = pipeline(p, f, w - 1, free, s.cur && !s.curDone ? totalTok(s) - s.cur.tok0 : 0)
+    const list = live(v, w, free - pipe.length, f, now)
+    lines.push(...list)
+    if (pipe.length) lines.push(...Array.from({ length: free - list.length - PIPE_ROWS }, () => []), ...pipe.map(l => [{ t: ' ' }, ...l]))
     return (
       <Box flexDirection="column" width={cols} paddingX={1}>
         {lines.map((l, i) => (
           <Text key={`d${i}`} wrap="truncate-end">
-            {l.length ? l.map((x, j) => <Text key={`d${i}s${j}`} color={x.c} weight={x.b ? 'bold' : undefined} dimColor={x.d} >{x.t}</Text>) : ' '}
+            {l.length ? l.map((x, j) => <Text key={`d${i}s${j}`} color={x.bg ? 'inverseText' : x.c} backgroundColor={x.bg} weight={x.b ? 'bold' : undefined} dimColor={x.d} >{x.t}</Text>) : ' '}
           </Text>
         ))}
       </Box>
@@ -189,6 +199,7 @@ export async function deckTurnDone($: EngineInterface, e: { agentId?: string }) 
     return
   }
   running = false
+  phase = { kind: 'idle' }
   const now = await $.clock.now()
   // the cost now, so the turn's share is its own (the 5s poll may lag)
   const cost = await $.session.usage().then(u => u.cost?.usd).catch(() => undefined)
@@ -228,7 +239,15 @@ export async function deckMeasure($: EngineInterface, e: { context: DeckState['c
   }))
 }
 
+/** A main-session tool call is about to run: the pipeline shows it until it returns. */
+export function deckToolStart(e: { tool: string; agentId?: string }) {
+  if (e.agentId) return
+  const a = e as unknown as Record<string, unknown>
+  phase = toolPhase(e.tool, (a.input ?? a) as Record<string, unknown>)
+}
+
 export async function deckTool($: EngineInterface, e: { tool: string; agentId?: string }, r: unknown) {
+  if (!e.agentId && phase.kind === 'tool') phase = { kind: 'thinking' }
   await quiet(async () => {
     if ((e as { agentId?: string }).agentId) return
     const now = await $.clock.now()

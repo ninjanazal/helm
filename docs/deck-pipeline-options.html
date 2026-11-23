@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>helm deck: 10 pipeline options</title>
+<style>
+  :root { --bg:#e9e9ec; --pane:#f4f4f4; --line:#d6d6da; --text:#2a2a2e; --dim:#77777f;
+    --claude:#c8623f; --success:#2e7d3e; --warning:#9a7221; --error:#c0392b; --suggestion:#5462d6; --subtle:#b0b0b6; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, sans-serif; padding:24px; }
+  header { max-width:1240px; margin:0 auto 20px; display:flex; flex-wrap:wrap; gap:12px 24px; align-items:end; justify-content:space-between; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  header p { margin:0; color:var(--dim); max-width:640px; }
+  .ctl { display:flex; flex-wrap:wrap; gap:8px; }
+  button { background:var(--pane); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+  button[aria-pressed="true"] { border-color:var(--claude); color:var(--claude); }
+  main { max-width:1240px; margin:0 auto; display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap:16px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 16px 16px; }
+  .card h2 { font-size:15px; margin:0 0 2px; display:flex; gap:8px; align-items:baseline; }
+  .card h2 .n { color:var(--claude); font-variant-numeric:tabular-nums; }
+  .card h2 .h { margin-left:auto; color:var(--dim); font-weight:400; font-size:12px; }
+  .card .note { color:var(--dim); font-size:13px; margin:0 0 10px; min-height:2.9em; }
+  pre { margin:0; background:var(--pane); border-left:2px solid #6b78f0; border-radius:4px; padding:10px 12px; overflow-x:auto;
+    font:13px/1.3 "JetBrains Mono", "DejaVu Sans Mono", "Menlo", monospace; color:var(--text); }
+  .c-claude{color:var(--claude)} .c-success{color:var(--success)} .c-warning{color:var(--warning)} .c-error{color:var(--error)}
+  .c-suggestion{color:var(--suggestion)} .c-subtle{color:var(--subtle)} .c-dim{color:var(--dim)} .c-text{color:var(--text)}
+  .b { font-weight:700; }
+  .inv { color:#fff !important; border-radius:2px; }
+  .inv.c-claude{background:var(--claude)} .inv.c-suggestion{background:var(--suggestion)} .inv.c-warning{background:var(--warning)} .inv.c-subtle{background:var(--subtle)}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Deck pipeline: 10 options</h1>
+    <p>Each card is the bottom of the deck pane (light theme, as in your screenshot): the usage section, then the scene in the free rows. All play the same states: thinking, a tool, waiting on you, idle. Idle never moves. Pick by number.</p>
+  </div>
+  <div class="ctl" id="ctl">
+    <button data-s="auto" aria-pressed="true">Auto</button>
+    <button data-s="thinking" aria-pressed="false">Thinking</button>
+    <button data-s="tool" aria-pressed="false">Tool</button>
+    <button data-s="waiting" aria-pressed="false">Waiting</button>
+    <button data-s="idle" aria-pressed="false">Idle</button>
+    <button id="pause" aria-pressed="false">Pause</button>
+  </div>
+</header>
+<main id="grid"></main>
+<script>
+const W = 40
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+const GLYPH = { reading: '≡', editing: '✎', searching: '⌕', running: '›_', testing: '✔' }
+const TOOLS = [['reading', 'deck-core.ts'], ['editing', 'deck.tsx'], ['searching', 'bodyRows'], ['running', 'git status'], ['testing', 'make check']]
+const COL = { thinking: 'c-claude', tool: 'c-suggestion', waiting: 'c-warning', idle: 'c-subtle' }
+// a link of n cells with a moving head; dir 1 → right, -1 ← left; still when off
+const link = (n, ch, on, f, dir = 1, head = '●', c = 'c-claude') => {
+  if (!on) return [[ch.repeat(n), 'c-subtle']]
+  const i = dir > 0 ? f % n : n - 1 - (f % n)
+  return [[ch.repeat(i), c], [head, c + ' b'], [ch.repeat(n - 1 - i), c]]
+}
+const word = (st, v, tgt) =>
+  st === 'thinking' ? [['thinking', 'c-claude b'], [' · 3.2k out', 'c-dim']]
+  : st === 'tool' ? [[v, 'c-suggestion b'], [' ' + tgt, 'c-text']]
+  : st === 'waiting' ? [['waiting on you', 'c-warning b'], [' · permission', 'c-dim']]
+  : [['idle', 'c-subtle'], [' · your next prompt', 'c-dim']]
+const spin = (f, st) => st === 'idle' ? '○' : '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'[f % 10]
+
+const OPTIONS = [
+  { name: 'Rail', note: 'One line. Stations named inline, a heavy rail lights up and a bead travels the active leg.', fn: (st, f, v, t) => [
+    [['you ', st === 'waiting' ? 'c-warning b' : 'c-dim'], ...link(10, '━', st === 'thinking' || st === 'waiting', f, st === 'waiting' ? -1 : 1, '◆', COL[st]),
+     [' model ', st === 'thinking' ? 'c-claude b' : 'c-dim'], ...link(10, '━', st === 'tool', f, 1, '◆', 'c-suggestion'), [' tools', st === 'tool' ? 'c-suggestion b' : 'c-dim']],
+    [], [[spin(f, st) + ' ', COL[st]], ...word(st, v, t)]] },
+
+  { name: 'Rounded boxes', note: 'Three boxed stages joined by arrows; the active box takes the state colour, its arrow pulses.', fn: (st, f, v, t) => {
+    const a = (on) => on ? [['─'.repeat(f % 4) + '▸' + '─'.repeat(3 - f % 4), COL[st] + ' b']] : [['────', 'c-subtle']]
+    const c = k => (k === 'you' && st === 'waiting') || (k === 'model' && st === 'thinking') || (k === 'tools' && st === 'tool') ? COL[st] + ' b' : 'c-subtle'
+    const mid = { you: st === 'waiting' && f % 6 < 3 ? '  ?  ' : ' you ', model: st === 'thinking' ? ' ' + spin(f, st) + ' ✻ ' : 'model', tools: st === 'tool' ? ' ' + (GLYPH[v] + '   ').slice(0, 3) + ' ' : 'tools' }
+    return [
+      [['╭─────╮', c('you')], ['    ', ''], ['╭─────╮', c('model')], ['    ', ''], ['╭─────╮', c('tools')]],
+      [['│', c('you')], [mid.you, c('you')], ['│', c('you')], ...a(st === 'thinking' || st === 'waiting'), ['│', c('model')], [mid.model, c('model')], ['│', c('model')], ...a(st === 'tool'), ['│', c('tools')], [mid.tools, c('tools')], ['│', c('tools')]],
+      [['╰─────╯', c('you')], ['    ', ''], ['╰─────╯', c('model')], ['    ', ''], ['╰─────╯', c('tools')]],
+      [['  ', ''], ...word(st, v, t)]] } },
+
+  { name: 'Pills', note: 'Three pills; the active one is filled with the state colour. A sweep underlines it.', fn: (st, f, v, t) => {
+    const k = st === 'waiting' ? 0 : st === 'thinking' ? 1 : st === 'tool' ? 2 : -1
+    const names = [' you ', ' model ', st === 'tool' ? ` ${GLYPH[v]} ${v} ` : ' tools ']
+    const r = [], u = []
+    names.forEach((n, i) => { r.push([n, i === k ? 'inv ' + COL[st] + ' b' : 'c-dim']); r.push([i < 2 ? ' › ' : '', 'c-subtle'])
+      const L = [...n].length; u.push([i === k ? [...'▔'.repeat(L)].map((c, j) => (j === f % L ? '▀' : '▔')).join('') : ' '.repeat(L), COL[st]]); u.push([i < 2 ? '   ' : '', ''])})
+    return [r, u, [['  ', ''], ...word(st, v, t)]] } },
+
+  { name: 'Chevron stream', note: 'Chevrons drift toward where the work is going. Back toward you when it waits on you.', fn: (st, f, v, t) => {
+    const s = (on, dir, c) => { if (!on) return [['·········', 'c-subtle']]
+      return [[[...Array(9)].map((_, i) => ((i - dir * f) % 3 + 3) % 3 === 0 ? (dir > 0 ? '›' : '‹') : '·').join(''), c + ' b']] }
+    return [[['  you   ', 'c-dim'], ['        model     ', 'c-dim'], ['   tools', 'c-dim']],
+      [[st === 'waiting' ? (f % 6 < 3 ? ' (?) ' : ' ( ) ') : ' (›) ', st === 'waiting' ? 'c-warning b' : 'c-dim'], ...s(st === 'thinking' || st === 'waiting', st === 'waiting' ? -1 : 1, COL[st]),
+       [' (' + (st === 'idle' ? '○' : spin(f, st)) + ') ', st === 'thinking' ? 'c-claude b' : 'c-dim'], ...s(st === 'tool', 1, 'c-suggestion'), [' (' + (st === 'tool' ? GLYPH[v] : '·') + ')', st === 'tool' ? 'c-suggestion b' : 'c-dim']],
+      [], [['  ', ''], ...word(st, v, t)]] } },
+
+  { name: 'Vertical flow', note: 'Uses the height: stages stacked down the pane, a drop falls along the active pipe.', fn: (st, f, v, t) => {
+    const pipe = (on, dir, c) => [0, 1, 2].map(i => [['   ', ''], [on && (dir > 0 ? f % 3 : 2 - f % 3) === i ? '●' : '│', on ? c + ' b' : 'c-subtle']])
+    const node = (n, on, c, extra = '') => [[' ◉ ', on ? c + ' b' : 'c-subtle'], [n, on ? c + ' b' : 'c-dim'], [extra, 'c-dim']]
+    return [node('you', st === 'waiting', 'c-warning', st === 'waiting' && f % 6 < 3 ? '  ?' : ''),
+      ...pipe(st === 'thinking' || st === 'waiting', st === 'waiting' ? -1 : 1, COL[st]),
+      node('model', st === 'thinking', 'c-claude', st === 'thinking' ? '  ' + spin(f, st) + ' 3.2k out' : ''),
+      ...pipe(st === 'tool', 1, 'c-suggestion'),
+      node('tools', st === 'tool', 'c-suggestion', st === 'tool' ? `  ${GLYPH[v]} ${v} ${t}` : ''),
+      [], [['   ', ''], ...word(st, v, t)]] } },
+
+  { name: 'Pulse line', note: 'An ECG trace runs under the stage names; it beats in the colour of whoever is busy. Idle is flat.', fn: (st, f, v, t) => {
+    const beat = '__/\\_/‾\\__'; const n = 36
+    const tr = st === 'idle' ? '─'.repeat(n) : [...Array(n)].map((_, i) => { const j = (i + f) % 18; return j < beat.length ? beat[j] : '_' }).join('').replace(/_/g, '─').replace(/‾/g, '─')
+    const at = st === 'waiting' ? 0 : st === 'thinking' ? 1 : st === 'tool' ? 2 : -1
+    return [[['you', at === 0 ? 'c-warning b' : 'c-dim'], ['            ', ''], ['model', at === 1 ? 'c-claude b' : 'c-dim'], ['           ', ''], [st === 'tool' ? GLYPH[v] + ' tools' : 'tools', at === 2 ? 'c-suggestion b' : 'c-dim']],
+      [[tr, COL[st] + (st === 'idle' ? '' : ' b')]], [], [[spin(f, st) + ' ', COL[st]], ...word(st, v, t)]] } },
+
+  { name: 'Segmented bar', note: 'A bar split in three thirds like the usage bars above; the active third fills with a moving shimmer.', fn: (st, f, v, t) => {
+    const k = st === 'waiting' ? 0 : st === 'thinking' ? 1 : st === 'tool' ? 2 : -1, n = 12
+    const seg = i => i === k ? [[[...Array(n)].map((_, j) => (j === f % n || j === (f + 1) % n) ? '▓' : '█').join(''), COL[st]]] : [['█'.repeat(n), 'c-subtle']]
+    return [[['you         ', 'c-dim'], ['model       ', 'c-dim'], ['tools', 'c-dim']],
+      [...seg(0), [' ', ''], ...seg(1), [' ', ''], ...seg(2)], [[spin(f, st) + ' ', COL[st]], ...word(st, v, t)]] } },
+
+  { name: 'Orbit core', note: 'The model sits in the centre with a ring that spins while it thinks; tools and you hang off either side.', fn: (st, f, v, t) => {
+    const ring = ['◜ ◝', '◝ ◞', '◞ ◟', '◟ ◜'][st === 'thinking' ? f % 4 : 0]
+    const cm = st === 'thinking' ? 'c-claude b' : 'c-subtle'
+    const l = link(8, '┄', st === 'waiting', f, -1, '◂', 'c-warning'), r = link(8, '┄', st === 'tool', f, 1, '▸', 'c-suggestion')
+    return [[['              ', ''], [ring.slice(0, 1) + ' ─ ' + ring.slice(2), cm]],
+      [[st === 'waiting' && f % 6 < 3 ? ' ? ' : 'you', st === 'waiting' ? 'c-warning b' : 'c-dim'], ['  ', ''], ...l, [' │ ✻ │ ', cm], ...r, ['  ', ''], [st === 'tool' ? GLYPH[v] : 'tools', st === 'tool' ? 'c-suggestion b' : 'c-dim']],
+      [['              ', ''], [ring.slice(2) + ' ─ ' + ring.slice(0, 1), cm]], [['  ', ''], ...word(st, v, t)]] } },
+
+  { name: 'Activity strip', note: 'A scrolling history of the last 36 moments, one coloured block each: see the rhythm of thinking vs tools vs waits.', fn: (st, f, v, t, hist) => [
+    [['you ', 'c-warning'], ['model ', 'c-claude'], ['tools', 'c-suggestion'], ['            last 30s', 'c-subtle']],
+    hist.map(h => ['▮', COL[h]]), [[spin(f, st) + ' ', COL[st]], ...word(st, v, t)]] },
+
+  { name: 'Minimal', note: 'Two rows: a three-dot indicator for who has the ball, then the label with a spinner and elapsed time.', fn: (st, f, v, t) => {
+    const k = st === 'waiting' ? 0 : st === 'thinking' ? 1 : st === 'tool' ? 2 : -1
+    const dots = [0, 1, 2].map(i => [i === k ? '●' : '○', i === k ? COL[st] + ' b' : 'c-subtle'])
+    const sec = st === 'idle' ? '' : ` · ${(f % 40) / 4 | 0}s`
+    return [[dots[0], [' you  ', k === 0 ? 'c-warning' : 'c-subtle'], dots[1], [' model  ', k === 1 ? 'c-claude' : 'c-subtle'], dots[2], [' tools', k === 2 ? 'c-suggestion' : 'c-subtle']],
+      [[spin(f, st) + ' ', COL[st]], ...word(st, v, t), [sec, 'c-dim']]] } },
+]
+
+const grid = document.getElementById('grid')
+const pres = OPTIONS.map((o, i) => {
+  const el = document.createElement('div'); el.className = 'card'
+  el.innerHTML = `<h2><span class="n">${i + 1}</span>${esc(o.name)}<span class="h"></span></h2><p class="note">${esc(o.note)}</p><pre></pre>`
+  grid.appendChild(el); return { pre: el.querySelector('pre'), h: el.querySelector('.h') }
+})
+const row = segs => segs.map(([t, c]) => `<span class="${c}">${esc(t)}</span>`).join('')
+const above = [
+  [['◷ usage ', 'c-suggestion b'], ['─'.repeat(W - 8), 'c-subtle']],
+  [['context ', 'c-dim'], ['███', 'c-success'], ['████████████████', 'c-subtle'], [' 11%', 'c-success b']],
+  [['5h      ', 'c-dim'], ['█████████████', 'c-warning'], ['██████', 'c-subtle'], [' 70%', 'c-warning b']],
+  [['$2.12 · 148k tok', 'c-dim']], [],
+]
+const STATES = ['thinking', 'tool', 'waiting', 'idle']
+let mode = 'auto', paused = false, f = 0, hist = Array(36).fill('idle')
+function draw() {
+  const st = mode === 'auto' ? STATES[Math.floor(f / 40) % 4] : mode
+  const [v, tgt] = TOOLS[Math.floor(f / 20) % TOOLS.length]
+  if (f % 4 === 0) hist = [...hist.slice(1), st]
+  OPTIONS.forEach((o, i) => {
+    const art = o.fn(st, f, v, tgt, hist)
+    pres[i].pre.innerHTML = [...above.map(row), ...art.map(row)].join('\n')
+    pres[i].h.textContent = `${art.length} rows`
+  })
+}
+setInterval(() => { if (!paused) { f++; draw() } }, 120)
+draw()
+document.getElementById('ctl').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return
+  if (b.id === 'pause') { paused = !paused; b.setAttribute('aria-pressed', String(paused)); return }
+  mode = b.dataset.s
+  document.querySelectorAll('[data-s]').forEach(x => x.setAttribute('aria-pressed', String(x === b)))
+  draw()
+})
+</script>
+</body>
+</html>

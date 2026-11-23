@@ -6,7 +6,8 @@
 
 import type { DeckAgent, DeckCheck, DeckTodo } from '../types'
 
-export type Seg = { t: string; c?: string; b?: boolean; d?: boolean }
+/** A run of text: `c` its colour, `bg` a fill (the text then draws in `inverseText`), `b` bold, `d` dim. Theme names only. */
+export type Seg = { t: string; c?: string; bg?: string; b?: boolean; d?: boolean }
 export type Line = Seg[]
 
 export type FeedItem = { at: number; kind: 'find' | 'read' | 'edit' | 'run' | 'test' | 'topic' | 'note'; text: string; note?: string; tone?: 'good' | 'bad' | 'warn' | 'dim' }
@@ -40,6 +41,8 @@ export type DeckData = {
   drift: Drift
   feed: FeedItem[]
   running: boolean
+  /** What the main session is doing now, for the task section's "now" row. */
+  phase?: Phase
 }
 
 export type Drift = { score: number; ctx: number; topic: number; turns: number }
@@ -137,6 +140,19 @@ export function drift(ctxPct: number, topic: number, turns: number): Drift {
 
 export const len = (l: Line) => l.reduce((a, s) => a + [...s.t].length, 0)
 
+/**
+ * Text in `w` cells: as is when it fits; else, while a turn runs, a carousel that scrolls one cell every other
+ * frame; else cut with `…`. Idle never moves.
+ */
+export function marquee(text: string, w: number, frame: number, moving: boolean): string {
+  const ch = [...text]
+  if (ch.length <= w) return text
+  if (!moving || w < 4) return ch.slice(0, Math.max(0, w - 1)).join('') + '…'
+  const loop = [...ch, ' ', ' ', '·', ' ', ' ']
+  const at = (frame >> 1) % loop.length
+  return [...loop.slice(at), ...loop.slice(0, at)].slice(0, w).join('')
+}
+
 function padTo(l: Line, w: number): Line {
   const n = len(l)
   return n >= w ? clip(l, w) : [...l, { t: ' '.repeat(w - n) }]
@@ -154,19 +170,15 @@ function clip(l: Line, w: number): Line {
 }
 
 
-/** A block bar drawn in eighths on a `░` track, with `┊` at the threshold mark. */
-/**
- * A bar of `▆` cells: coloured when filled, dim for the track, the threshold mark in the warning colour.
- * `▆` leaves a gap above, so stacked bars stay separate rows (full blocks merge into one shape in the app).
- */
+/** A bar of `▰` cells on a `▱` track: coloured when filled, dim for the track, the threshold mark in the warning colour. */
 export function bar(p: number, w: number, c: string, mark?: number): Line {
   const full = Math.round(Math.max(0, Math.min(1, p)) * w)
   const m = mark === undefined ? -1 : Math.min(w - 1, Math.round(mark * w))
   const out: Line = []
   for (let i = 0; i < w; i++) {
-    if (i === m && i >= full) out.push({ t: '▆', c: 'warning' })
-    else if (i < full) out.push({ t: '▆', c })
-    else out.push({ t: '▆', c: 'subtle' })
+    if (i === m && i >= full) out.push({ t: '▰', c: 'warning' })
+    else if (i < full) out.push({ t: '▰', c })
+    else out.push({ t: '▱', c: 'subtle' })
   }
   return merge(out)
 }
@@ -201,7 +213,7 @@ function merge(l: Line): Line {
   const out: Line = []
   for (const s of l) {
     const p = out[out.length - 1]
-    if (p && p.c === s.c && p.d === s.d && p.b === s.b && p.inv === s.inv) p.t += s.t
+    if (p && p.c === s.c && p.d === s.d && p.b === s.b && p.bg === s.bg) p.t += s.t
     else out.push({ ...s })
   }
   return out
@@ -276,13 +288,14 @@ const clock = (ms: number) => (ms < 60000 ? `${Math.max(0, Math.round(ms / 1000)
 const dot: Seg = { t: ' · ', d: true }
 
 /** Pack items onto rows no wider than `w`, joined by a dim dot, so nothing is cut mid-item while a row has room. */
-function flow(items: Line[], w: number): Line[] {
+function flow(items: Line[], w: number, sep?: string): Line[] {
   const rows: Line[] = []
   let cur: Line = []
   for (const it of items) {
     if (!it.length) continue
-    if (cur.length && len(cur) + 3 + len(it) > w) { rows.push(cur); cur = [...it] }
-    else cur = cur.length ? [...cur, dot, ...it] : [...it]
+    const gap: Seg = sep === undefined ? dot : { t: sep }
+    if (cur.length && len(cur) + gap.t.length + len(it) > w) { rows.push(cur); cur = [...it] }
+    else cur = cur.length ? [...cur, gap, ...it] : [...it]
   }
   if (cur.length) rows.push(cur)
   return rows
@@ -316,24 +329,33 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   const narrow = w < 40
   const spinner = d.running ? SPIN[frame % SPIN.length]! : undefined
 
-  // header: topic, then time, turns, model, effort, lean, branch, files, tests
-  const spin: Seg = spinner ? { t: spinner, c: 'claude', b: true } : d.task ? { t: '✔', c: 'success' } : { t: '·', d: true }
+  // task: the goal, what is happening now, then model, effort and lean as chips, then the session's facts
+  const mv = d.running
+  const goal: Line = [d.task ? (d.running ? { t: '◎ ', c: 'claude', b: true } : { t: '✔ ', c: 'success' }) : { t: '· ', d: true },
+    d.task ? { t: marquee(d.task, w - 2, frame, mv), b: true } : { t: 'your next prompt becomes the task', d: true }]
+  const ph = d.phase ?? { kind: 'idle' as const }
+  const nowRow: Line = ph.kind === 'tool'
+    ? [{ t: (GLYPH[ph.verb] ?? '·') + ' ', c: 'suggestion', b: true }, { t: ph.verb + ' ', c: 'suggestion', b: true }, { t: marquee(ph.target, Math.max(4, w - 3 - ph.verb.length), frame, mv) }]
+    : ph.kind === 'thinking' ? [{ t: (spinner ?? '·') + ' ', c: 'claude' }, { t: 'writing', c: 'claude', b: true }]
+    : ph.kind === 'waiting' ? [{ t: '? ', c: 'warning', b: true }, { t: 'waiting on you', c: 'warning', b: true }]
+    : [{ t: '○ ', c: 'subtle' }, { t: 'idle', d: true }]
+  const chips: Line[] = []
+  if (d.model) chips.push([{ t: ` ${d.model} `, bg: 'claude', b: true }])
+  if (d.effort) {
+    const n = EFFORT[d.effort]
+    chips.push(n ? [{ t: '▰'.repeat(n), c: 'suggestion' }, { t: '▱'.repeat(4 - n), c: 'subtle' }, { t: ' ' + d.effort, c: 'suggestion', b: true }] : [{ t: d.effort, c: 'suggestion', b: true }])
+  }
+  if (d.lean) chips.push([{ t: 'lean ', d: true }, ...(['off', 'lite', 'full'] as const).map((l): Seg => (l === d.lean ? { t: ` ${l} `, bg: 'success', b: true } : { t: ` ${l} `, d: true }))])
   const items: Line[] = []
   if (d.taskAt !== undefined) items.push([{ t: fmtDur(now - d.taskAt) }])
   items.push([{ t: String(d.turns), b: true }, { t: d.turns === 1 ? ' turn' : ' turns', d: true }])
-  if (d.model) items.push([{ t: d.model, c: 'claude', b: true }])
-  if (d.effort) items.push([{ t: d.effort }])
-  if (d.lean && d.lean !== 'off') items.push([{ t: d.lean === 'lite' ? 'lean lite' : 'lean', c: 'success' }])
   if (d.branch) items.push([{ t: `⎇ ${d.branch}` }, ...(d.dirty ? [{ t: ` ±${d.dirty}`, c: 'warning' }] : [])])
   if (d.touched?.length) {
     const edited = d.touched.filter(t => t.edited).length
     items.push([{ t: '✎ ', c: 'claude' }, { t: String(edited), b: true }, { t: ' edited', d: true }, ...(d.touched.length - edited ? [{ t: ` ${d.touched.length - edited} read`, d: true }] : [])])
   }
   if (d.tests) items.push([d.tests.ok ? { t: `✔ ${d.tests.text}`, c: 'success' } : { t: `✘ ${d.tests.text}`, c: 'error' }, { t: ` ${fmtDur(now - d.tests.at)} ago`, d: true }])
-  sec('head', '', 'claude', [
-    [spin, { t: ' ' }, d.task ? { t: d.task, b: true } : { t: 'your next prompt becomes the task', d: true }],
-    ...flow(items, w),
-  ])
+  sec('head', '▣ TASK', 'claude', [goal, nowRow, ...flow(chips, w, ' '), ...flow(items, w)], ph.kind !== 'idle')
 
   // focus: how far the session has drifted from the task
   const hi = d.drift.score >= DRIFT_AT
@@ -397,8 +419,8 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
 }
 
 /**
- * The open layout: per titled section a coloured title and a rule (a light sweeps it only where work is
- * flowing, and only while a turn runs), then its body indented one column. The header has no title. No boxes.
+ * The title-tab layout: per section a tab filled in its tone, its meta dim after it, then a rule (a light sweeps it
+ * only where work is flowing, and only while a turn runs), then its body indented one column. No side borders.
  */
 const TITLE_TONE: Record<string, string> = { claude: 'claude', success: 'success', warning: 'warning', error: 'error', suggestion: 'suggestion', subtle: 'subtle' }
 export function layout(secs: Section[], w: number, frame: number, running: boolean): Line[] {
@@ -406,7 +428,7 @@ export function layout(secs: Section[], w: number, frame: number, running: boole
   secs.forEach((sec, k) => {
     if (sec.title) {
       const [, ico = '', name = sec.title] = /^(\S+) (.*)$/.exec(sec.title) ?? []
-      const head: Line = [{ t: ico, c: TITLE_TONE[sec.tone], b: true }, { t: ' ' + name.toLowerCase(), c: TITLE_TONE[sec.tone], b: true }, ...(sec.meta ? [{ t: ' · ' + sec.meta, d: true }] : []), { t: ' ' }]
+      const head: Line = [{ t: ` ${ico} ${name.toLowerCase()} `, bg: TITLE_TONE[sec.tone], b: true }, ...(sec.meta ? [{ t: ' ' + sec.meta, d: true }] : []), { t: ' ' }]
       out.push([...head, ...rule(Math.max(4, w - len(head)), running && sec.live ? frame * 2 - k * 9 : undefined)])
     }
     for (const l of sec.body) out.push([{ t: ' ' }, ...l])
@@ -472,6 +494,85 @@ export function verdict(c: { seq: string; whole: number; edits: number; tests?: 
 }
 
 export const PANE_FRAME_MS = 120
+
+// ── pipeline: you → model → tools, drawn in the pane's free rows ──
+
+export const TEST_RE = /\b(make (test|check)|npm (run )?test|pnpm test|yarn test|bun test|cargo test|pytest|go test|claude plugin test)\b/
+
+/** What the session is doing: the model writing, a tool running, a dialog waiting on the person, or nothing. */
+export type Phase = { kind: 'thinking' } | { kind: 'tool'; verb: string; target: string } | { kind: 'waiting' } | { kind: 'idle' }
+
+const GLYPH: Record<string, string> = { reading: '≡', editing: '✎', searching: '⌕', running: '>_', testing: '✔' }
+
+/** The verb and target a tool call shows while it runs, from its name and input. */
+export function toolPhase(tool: string, input: Record<string, unknown>): Phase {
+  const base = (p: unknown) => String(p ?? '').split('/').slice(-2).join('/')
+  if (tool === 'Read') return { kind: 'tool', verb: 'reading', target: base(input.file_path) }
+  if (tool === 'Edit' || tool === 'Write' || tool === 'NotebookEdit') return { kind: 'tool', verb: 'editing', target: base(input.file_path ?? input.notebook_path) }
+  if (tool === 'Grep' || tool === 'Glob') return { kind: 'tool', verb: 'searching', target: String(input.pattern ?? '') }
+  if (tool === 'Bash') {
+    const cmd = String(input.command ?? '')
+    const m = TEST_RE.exec(cmd)
+    return m ? { kind: 'tool', verb: 'testing', target: m[0] } : { kind: 'tool', verb: 'running', target: cmd.split('\n')[0]! }
+  }
+  return { kind: 'tool', verb: 'using', target: tool.replace(/^mcp__/, '').replace(/__/g, ' ') }
+}
+
+/** The pipeline's height in rows. */
+export const PIPE_ROWS = 3
+const PIPE_W = 24
+const EFFORT: Record<string, number> = { low: 1, medium: 2, high: 3, xhigh: 4, max: 4 }
+const PHASE_TONE = { thinking: 'claude', tool: 'suggestion', waiting: 'warning', idle: 'subtle' } as const
+
+/**
+ * Three rows, centred: a bar in three thirds (you, model, tools) where the third that has the ball is filled in the
+ * phase's colour with its name inside, a blank row, then a label with a spinner. Thinking fills model, a tool fills
+ * tools (named by its glyph and verb), waiting fills you with a blinking `?`. Idle is dim and still: it reads no
+ * frame. None when it does not fit.
+ */
+export function pipeline(p: Phase, frame: number, w: number, rows: number, turnTok = 0): Line[] {
+  if (rows < PIPE_ROWS || w < PIPE_W) return []
+  const k = p.kind
+  const n = Math.min(14, Math.floor((w - 2) / 3))
+  const tone = PHASE_TONE[k]
+  const at = k === 'waiting' ? 0 : k === 'thinking' ? 1 : k === 'tool' ? 2 : -1
+  const names = [k === 'waiting' && (frame >> 2) % 2 ? '?' : 'you', 'model', p.kind === 'tool' ? `${GLYPH[p.verb] ?? '·'} ${p.verb}` : 'tools']
+  const cell = (s: string) => { const t = [...s].slice(0, n); const l = (n - t.length) >> 1; return ' '.repeat(l) + t.join('') + ' '.repeat(n - t.length - l) }
+  const third = (i: number): Seg => (i === at ? { t: cell(names[i]!), bg: tone, b: true } : { t: '▱'.repeat(n), c: 'subtle' })
+  const barRow: Line = [third(0), { t: ' ' }, third(1), { t: ' ' }, third(2)]
+  const spin = k === 'idle' ? '○' : SPIN[frame % SPIN.length]!
+  const label: Line =
+    p.kind === 'thinking' ? [{ t: 'thinking', c: 'claude', b: true }, ...(turnTok > 0 ? [{ t: ` · ${fmtTok(turnTok)} this turn`, d: true }] : [])]
+    : p.kind === 'tool' ? [{ t: p.verb, c: 'suggestion', b: true }, { t: ' ' + marquee(p.target, Math.max(4, w - 3 - p.verb.length), frame, true) }]
+    : p.kind === 'waiting' ? [{ t: 'waiting on you', c: 'warning', b: true }]
+    : [{ t: 'idle', c: 'subtle' }, { t: ' · your next prompt', d: true }]
+  const centre = (l: Line): Line => { const c = clip(l, w); const pad = (w - len(c)) >> 1; return pad > 0 ? [{ t: ' '.repeat(pad) }, ...c] : c }
+  return [centre(barRow), [], centre([{ t: spin + ' ', c: tone }, ...label])]
+}
+
+const FEED_ICON: Record<FeedItem['kind'], string> = { find: '⌕', read: '≡', edit: '✎', run: '›', test: '✔', topic: '↯', note: '·' }
+/** The live list's age column: `12s`, `4m`, `1h`. */
+const AGE_W = 4
+const FEED_TONE: Record<string, string> = { good: 'success', bad: 'error', warn: 'warning', dim: 'subtle' }
+
+/**
+ * The live list for the free rows, as a timeline: a `live` tab, then the age, a `│` spine and what happened, newest
+ * first: running sub agents (`now`), then the feed (finds, reads, edits, runs, tests, notes). Long text scrolls as a carousel while running.
+ * None under 3 rows or when there is nothing to list.
+ */
+export function live(d: Pick<DeckData, 'feed' | 'agents' | 'running'>, w: number, rows: number, frame: number, now: number): Line[] {
+  if (rows < 3) return []
+  const out: Line[] = []
+  for (const a of (d.agents ?? []).filter(a => a.endedAt === undefined)) out.push([{ t: 'now'.padStart(AGE_W), c: 'claude' }, { t: ' │ ', c: 'subtle' }, { t: '⌁ ', c: 'claude', b: true }, { t: marquee(`${a.type ?? 'agent'} · ${a.task}`, Math.max(4, w - AGE_W - 6), frame, d.running), c: 'claude' }])
+  for (const f of [...d.feed].reverse()) {
+    const age = fmtDur(Math.max(0, now - f.at)).split(' ')[0]!
+    const text = f.note ? `${f.text} ${f.note}` : f.text
+    out.push([{ t: age.padStart(AGE_W), c: 'subtle' }, { t: ' │ ', c: 'subtle' }, { t: FEED_ICON[f.kind] + ' ', c: f.tone ? FEED_TONE[f.tone] : 'suggestion' }, { t: marquee(text, Math.max(4, w - AGE_W - 6), frame, d.running), d: true }])
+  }
+  if (!out.length) return []
+  const tab: Line = [{ t: ' ● live ', bg: d.running ? 'claude' : 'subtle', b: true }, { t: ' ' }, { t: '─'.repeat(Math.max(0, w - 9)), c: 'subtle' }]
+  return [tab, ...out.slice(0, rows - 2).map(l => [{ t: ' ' }, ...l]), []].map(l => clip(l, w))
+}
 
 /** Whether the deck opens: on unless stored off for the project. */
 export function isDeckOn(stored: unknown): boolean {

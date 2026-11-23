@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>helm deck: 7 scene options for the empty rows</title>
+<style>
+  :root { --bg:#16161a; --pane:#1e1e24; --line:#2c2c35; --text:#e6e6ea; --dim:#8a8a96;
+    --claude:#d97757; --success:#4eba65; --warning:#e5b93c; --error:#ff6b80; --suggestion:#b1b9f9; --subtle:#5c5c68; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, sans-serif; padding:24px; }
+  header { max-width:1200px; margin:0 auto 20px; display:flex; flex-wrap:wrap; gap:12px 24px; align-items:end; justify-content:space-between; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  header p { margin:0; color:var(--dim); max-width:640px; }
+  .ctl { display:flex; flex-wrap:wrap; gap:8px; }
+  button { background:var(--pane); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+  button[aria-pressed="true"] { border-color:var(--claude); color:var(--claude); }
+  main { max-width:1200px; margin:0 auto; display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap:16px; }
+  .card { background:var(--pane); border:1px solid var(--line); border-radius:10px; padding:14px 16px 16px; }
+  .card h2 { font-size:15px; margin:0 0 2px; display:flex; gap:8px; align-items:baseline; }
+  .card h2 .n { color:var(--claude); font-variant-numeric:tabular-nums; }
+  .card h2 .h { margin-left:auto; color:var(--dim); font-weight:400; font-size:12px; }
+  .card .note { color:var(--dim); font-size:13px; margin:0 0 10px; min-height:2.9em; }
+  pre { margin:0; background:#111114; border:1px solid var(--line); border-radius:6px; padding:10px 12px; overflow-x:auto;
+    font:13px/1.25 "JetBrains Mono", "DejaVu Sans Mono", "Menlo", monospace; color:var(--text); }
+  .free { color:var(--subtle); }
+  .c-claude{color:var(--claude)} .c-success{color:var(--success)} .c-warning{color:var(--warning)} .c-error{color:var(--error)}
+  .c-suggestion{color:var(--suggestion)} .c-subtle{color:var(--subtle)} .c-dim{color:var(--dim)} .c-text{color:var(--text)}
+  .b { font-weight:700; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Deck scene: 7 options</h1>
+    <p>Each card shows the bottom of the deck pane: the last section, then the free rows where the scene goes. All cards play the same states: thinking (the model is writing), a tool (reading, editing, searching, running, testing), waiting on you (a permission prompt or a question), and idle. Idle never moves. All art is original. Pick one by its number.</p>
+  </div>
+  <div class="ctl" id="ctl">
+    <button data-s="auto" aria-pressed="true">Auto</button>
+    <button data-s="thinking" aria-pressed="false">Thinking</button>
+    <button data-s="tool" aria-pressed="false">Tool</button>
+    <button data-s="waiting" aria-pressed="false">Waiting</button>
+    <button data-s="idle" aria-pressed="false">Idle</button>
+    <button id="pause" aria-pressed="false">Pause</button>
+  </div>
+</header>
+<main id="grid"></main>
+<script>
+// ── helpers ─────────────────────────────────────────────
+// A row is a list of [text, class]; class is a theme colour (c-*) plus optional ' b'.
+const W = 24
+const vlen = s => [...s].length
+const pad = (s, n) => s + ' '.repeat(Math.max(0, n - vlen(s)))
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+const one = (t, c = 'text') => [[t, c]]
+const rnd = n => { const x = Math.sin(n * 12.9898) * 43758.5453; return x - Math.floor(x) }
+const GLYPH = { reading: '≡', editing: '✎', searching: '⌕', running: '>_', testing: '✔' }
+const TOOLS = [['reading', 'deck-core.ts'], ['editing', 'deck.tsx'], ['searching', 'bodyRows'], ['running', 'git status'], ['testing', 'make check']]
+
+// ── the scenes: (state, frame, verb) → rows ─────────────
+const R = String.raw
+
+function unit(st, f, v) {
+  const t = f >> 2
+  let eyes = '-  -', mouth = '__', side = ['', '', '', ''], sc = 'c-subtle', body = 'c-claude'
+  if (st === 'thinking') {
+    eyes = ['o  o', '°  °', 'o  o', ' o o'][t % 4]; mouth = '--'; sc = 'c-suggestion'
+    side = ['', ['   ', '.  ', '.. ', '...'][t % 4], '', '']
+  } else if (st === 'tool') {
+    eyes = '>  <'; mouth = '=='; sc = 'c-suggestion b'
+    side = ['', (t % 2 ? '/=' : '\\=') + '[' + GLYPH[v] + ']', '', '']
+  } else if (st === 'waiting') {
+    eyes = t % 6 < 5 ? 'O  O' : '-  -'; mouth = '..'; sc = 'c-warning b'
+    side = [t % 2 ? ' !' : '', ' ?', '', '']
+  } else { body = 'c-subtle'; side = [' z', 'z', '', ''] }
+  const base = [R`   .-""-.`, `  ( ${eyes} )`, R`   \_` + mouth + R`_/`, '  [|____|]']
+  return base.map((b, i) => [[pad(b, 12), body], [side[i], sc]])
+}
+
+function bucket(st, f, v) {
+  const t = f >> 1
+  let level = 1, drops = '', pour = ['', '', ''], lid = false
+  if (st === 'thinking') { level = 1 + ((t >> 3) % 6); drops = [...'            '].map((_, i) => ((i + t) % 4 === 0 && i > 2 && i < 11 ? '∙' : ' ')).join('') }
+  else if (st === 'tool') { level = 6 - ((t >> 3) % 5); pour = ['', '', '=' + ['~ ', ' ~', '~~'][t % 3]] }
+  else if (st === 'waiting') { level = 4; lid = true }
+  const surf = i => ((i + t) % 3 === 0 ? '░' : '▒')
+  const fill = k => { // k: 0 = bottom row
+    if (level >= 2 * (k + 1)) return [...'▓▓▓▓▓▓▓▓'].join('')
+    if (level === 2 * k + 1) return st === 'idle' || st === 'waiting' ? '▒▒▒▒▒▒▒▒' : [...Array(8)].map((_, i) => surf(i)).join('')
+    return '        '
+  }
+  const liq = st === 'idle' ? 'c-subtle' : 'c-suggestion'
+  const rows = [
+    lid ? [['  .--------.', 'c-claude'], [(t >> 2) % 2 ? ' ?' : '', 'c-warning b']] : [['  ' + drops.slice(2), 'c-claude']],
+    [['  |', 'c-dim'], [fill(2), liq], ['|', 'c-dim'], [pour[0], 'c-suggestion']],
+    [['  |', 'c-dim'], [fill(1), liq], ['|', 'c-dim'], [pour[1], 'c-suggestion']],
+    [['  |', 'c-dim'], [fill(0), liq], ['|', 'c-dim'], [pour[2], 'c-suggestion']],
+    [["  '--------'", 'c-dim']],
+  ]
+  return rows
+}
+
+function wheel(st, f, v) {
+  const A = ['      |', '   .--+--.', '  -|  o  |-', "   '--+--'", '      |']
+  const B = [R`   \     /`, R`   .\---/.`, '   |  o  |', R`   '/---\'`, R`   /     \ `]
+  const speed = st === 'thinking' ? 5 : st === 'tool' ? 2 : 0
+  const w = speed && Math.floor(f / speed) % 2 ? B : A
+  const t = f >> 1
+  const sea = st === 'idle' ? '_   _   _   _   _' : st === 'waiting' ? '~   ~   ~   ~   ~' : '~^~ '.repeat(6)
+  const off = st === 'idle' || st === 'waiting' ? 0 : t % 4
+  const tone = st === 'idle' ? 'c-subtle' : 'c-claude'
+  const flag = st === 'waiting' && (t >> 2) % 2 ? '  ?' : ''
+  return [
+    ...w.map((r, i) => [[pad(r, 13), tone], [i === 0 ? flag : '', 'c-warning b']]),
+    [[' ' + sea.slice(off, off + 18), st === 'idle' ? 'c-subtle' : 'c-suggestion']],
+  ]
+}
+
+function pipeline(st, f, v) {
+  const t = f >> 1
+  const flow = (dir) => [...'─────'].map((_, i) => (i === (dir > 0 ? t % 5 : 4 - (t % 5)) ? '•' : '─')).join('')
+  const still = '─────'
+  const core = st === 'thinking' ? '◐◓◑◒'[t % 4] : st === 'idle' ? '○' : '●'
+  const you = st === 'waiting' ? ((t >> 2) % 2 ? '?' : ' ') : '>'
+  const tool = st === 'tool' ? GLYPH[v] : '·'
+  const k = (on, c) => (on ? c : 'c-subtle')
+  return [
+    [[' you    model   tools', 'c-dim']],
+    [
+      ['[', 'c-dim'], [you, k(st === 'waiting', 'c-warning b')], [']', 'c-dim'],
+      [st === 'waiting' ? flow(-1) : st === 'thinking' ? flow(1) : still, k(st === 'waiting' ? true : st === 'thinking', st === 'waiting' ? 'c-warning' : 'c-claude')],
+      ['(', 'c-dim'], [core, k(st !== 'idle', 'c-claude b')], [')', 'c-dim'],
+      [st === 'tool' ? flow(1) : still, k(st === 'tool', 'c-suggestion')],
+      ['[', 'c-dim'], [pad(tool, 2), k(st === 'tool', 'c-suggestion b')], [']', 'c-dim'],
+    ],
+  ]
+}
+
+function fire(st, f, v) {
+  const t = f >> 2
+  const F = {
+    thinking: [['', '', '    ,', '   ( )', '  (( ))'], ['', '', '     ,', '   ) (', '  (( ))']],
+    tool: [['   *  .', '    ) ,', '   ( ) (', '  (( )))', ' ((( ))))'], ['  .   *', '   , (', '   ) ( )', '  ((( ))', ' (((( )))']],
+    waiting: [['    ?', '     ~', '    .', '   .:.', '  .:::.'], ['     ?', '    ~', '     .', '   .:.', '  .:::.']],
+    idle: [['', '', '', '', '   ...']],
+  }[st]
+  const fr = F[t % F.length]
+  const tone = st === 'idle' ? 'c-subtle' : st === 'waiting' ? 'c-dim' : st === 'tool' ? 'c-warning' : 'c-claude'
+  return [
+    ...fr.map((r, i) => (st === 'waiting' && i === 0 ? [['  ' + r, 'c-warning b']] : st === 'tool' && i === 0 ? [['  ' + r, 'c-warning']] : [['  ' + r, tone]])),
+    [['   =\\=/=\\=', st === 'idle' ? 'c-subtle' : 'c-dim']],
+  ]
+}
+
+function orbit(st, f, v) {
+  const w = 20, h = 5, cx = 10, cy = 2
+  const g = [...Array(h)].map(() => [...Array(w)].map(() => [' ', 'c-subtle']))
+  for (let k = 0; k < 16; k++) { const a = (k / 16) * 2 * Math.PI; g[cy + Math.round(2 * Math.sin(a))][cx + Math.round(8 * Math.cos(a))] = ['·', 'c-subtle'] }
+  const n = st === 'tool' ? 3 : st === 'thinking' ? 1 : st === 'waiting' ? 2 : 0
+  const sp = st === 'tool' ? 0.22 : 0.09
+  const moving = st === 'thinking' || st === 'tool'
+  for (let k = 0; k < n; k++) {
+    const a = (moving ? f * sp : 0.6) + (k * 2 * Math.PI) / n
+    g[cy + Math.round(2 * Math.sin(a))][cx + Math.round(8 * Math.cos(a))] = ['●', st === 'waiting' ? 'c-dim' : st === 'tool' ? 'c-suggestion b' : 'c-claude b']
+  }
+  const blink = (f >> 3) % 2
+  const core = st === 'thinking' ? [blink ? '◉' : '○', 'c-claude b'] : st === 'tool' ? [GLYPH[v], 'c-suggestion b'] : st === 'waiting' ? [blink ? '?' : ' ', 'c-warning b'] : ['·', 'c-subtle']
+  const cs = [...core[0]]
+  cs.forEach((ch, i) => { g[cy][cx + i] = [ch, core[1]] })
+  return g.map(r => r.map(([c, k]) => [c, k]))
+}
+
+function strip(st, f, v) {
+  const B = '▁▂▃▄▅▆▇█'
+  const t = f >> 1
+  let top, marks = ''
+  if (st === 'thinking') top = [...Array(W)].map((_, i) => B[Math.round(3.5 + 3.5 * Math.sin((i + t) / 2.5))]).join('')
+  else if (st === 'tool') {
+    top = [...Array(W)].map((_, i) => B[Math.floor(rnd(i + t) * 8)]).join('')
+    marks = [...Array(W)].map((_, i) => ((i + t) % 6 === 0 ? 'rexft'[Math.floor(rnd(Math.floor((i + t) / 6)) * 5)] : ' ')).join('')
+  } else if (st === 'waiting') top = (t >> 2) % 2 ? '▃'.repeat(W) : '▁'.repeat(W)
+  else top = '▁'.repeat(W)
+  const tone = { thinking: 'c-claude', tool: 'c-suggestion', waiting: 'c-warning', idle: 'c-subtle' }[st]
+  return [[[top, tone]], [[marks, 'c-dim']]]
+}
+
+const OPTIONS = [
+  { name: 'Unit', fn: unit, note: 'A small robot. Its eyes wander and dots gather while it thinks; it holds the tool glyph while working, blinks with ?! while it waits, and dozes when idle.' },
+  { name: 'Token bucket', fn: bucket, note: 'Tokens drip into the bucket while the model thinks, a tap pours them out during tools, a lid and ? close it while it waits. Closest to the example link.' },
+  { name: 'Helm wheel', fn: wheel, note: 'A ship\'s wheel, after the plugin\'s name. It turns slowly while thinking and fast during tools, holds still with a ? flag while it waits, on a calm sea when idle.' },
+  { name: 'Pipeline', fn: pipeline, note: 'Two rows: you → model → tools. A dot flows along the active link: into the model while it thinks, out to the tool while working, back to you while it waits.' },
+  { name: 'Campfire', fn: fire, note: 'Small flames for thinking, a big fire with sparks for tools, smoke with a ? while it waits, embers when idle.' },
+  { name: 'Orbit', fn: orbit, note: 'A core with one slow satellite for thinking and three fast ones for tools (the core shows the tool glyph). A blinking ? while it waits, an empty orbit when idle.' },
+  { name: 'Activity strip', fn: strip, note: 'No figure, only two rows: a smooth wave for thinking, noisy bars with r/e/x/f/t markers for tools, a slow pulse while it waits, a flat line when idle.' },
+]
+
+// ── the label row, the same for every option ────────────
+function label(st, v, tgt) {
+  if (st === 'thinking') return [['thinking', 'c-claude b'], [' · 3.2k out', 'c-dim']]
+  if (st === 'tool') return [[v, 'c-suggestion b'], [' ' + tgt, 'c-text']]
+  if (st === 'waiting') return [['waiting on you', 'c-warning b'], [' · permission', 'c-dim']]
+  return [['idle', 'c-subtle'], [' · your next prompt', 'c-dim']]
+}
+
+// ── render ──────────────────────────────────────────────
+const grid = document.getElementById('grid')
+const pres = OPTIONS.map((o, i) => {
+  const el = document.createElement('div')
+  el.className = 'card'
+  el.innerHTML = `<h2><span class="n">${i + 1}</span>${esc(o.name)}<span class="h"></span></h2><p class="note">${esc(o.note)}</p><pre></pre>`
+  grid.appendChild(el)
+  return { pre: el.querySelector('pre'), h: el.querySelector('.h') }
+})
+const row = segs => segs.map(([t, c]) => `<span class="${c.split(' ').map(x => (x === 'b' ? 'b' : x)).join(' ')}">${esc(t)}</span>`).join('')
+const tail = [
+  [['☰', 'c-claude b'], [' todo', 'c-claude b'], [' · 2 of 4 ', 'c-dim'], ['──────────', 'c-subtle']],
+  [[' ✔ ', 'c-success'], ['read the pane props', 'c-dim']],
+  [[' ○ ', 'c-subtle'], ['add scene()', 'c-dim']],
+  [],
+]
+
+const STATES = ['thinking', 'tool', 'waiting', 'idle']
+let mode = 'auto', paused = false, f = 0
+function draw() {
+  const st = mode === 'auto' ? STATES[Math.floor(f / 40) % 4] : mode
+  const [v, tgt] = TOOLS[Math.floor(f / 20) % TOOLS.length]
+  OPTIONS.forEach((o, i) => {
+    const art = o.fn(st, f, v)
+    const lines = [...tail.map(row), `<span class="free">${'┄'.repeat(W)} free rows</span>`, ...art.map(row), '', ' ' + row(label(st, v, tgt))]
+    pres[i].pre.innerHTML = lines.join('\n')
+    pres[i].h.textContent = `${art.length + 2} rows`
+  })
+}
+setInterval(() => { if (!paused) { f++; draw() } }, 120)
+draw()
+
+document.getElementById('ctl').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return
+  if (b.id === 'pause') { paused = !paused; b.setAttribute('aria-pressed', String(paused)); return }
+  mode = b.dataset.s
+  document.querySelectorAll('[data-s]').forEach(x => x.setAttribute('aria-pressed', String(x === b)))
+  draw()
+})
+</script>
+</body>
+</html>

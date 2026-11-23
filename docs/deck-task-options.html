@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>helm deck: option 3: task section variants</title>
+<style>
+  :root { --bg:#e4e4e8; --pane:#f4f4f4; --line:#d6d6da; --text:#2a2a2e; --dim:#77777f;
+    --claude:#c8623f; --success:#2e7d3e; --warning:#9a7221; --error:#c0392b; --suggestion:#5462d6; --subtle:#b4b4ba; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, sans-serif; padding:24px; }
+  header { max-width:1400px; margin:0 auto 20px; display:flex; flex-wrap:wrap; gap:12px 24px; align-items:end; justify-content:space-between; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  header p { margin:0; color:var(--dim); max-width:700px; }
+  .ctl { display:flex; flex-wrap:wrap; gap:8px; }
+  button { background:#fff; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+  button[aria-pressed="true"] { border-color:var(--claude); color:var(--claude); }
+  main { max-width:1400px; margin:0 auto; display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 430px), 1fr)); gap:18px; }
+  .card h2 { font-size:15px; margin:0 0 2px; display:flex; gap:8px; align-items:baseline; }
+  .card h2 .n { color:var(--claude); }
+  .card .note { color:var(--dim); font-size:13px; margin:0 0 8px; min-height:2.9em; }
+  pre { margin:0; height:560px; background:var(--pane); border-left:2px solid #6b78f0; padding:12px 14px; overflow:hidden;
+    font:13px/1.32 "JetBrains Mono", "DejaVu Sans Mono", monospace; color:var(--text); box-shadow:0 1px 3px #0001; }
+  .c-claude{color:var(--claude)} .c-success{color:var(--success)} .c-warning{color:var(--warning)} .c-error{color:var(--error)}
+  .c-suggestion{color:var(--suggestion)} .c-subtle{color:var(--subtle)} .c-dim{color:var(--dim)} .c-text{color:var(--text)}
+  .b { font-weight:700; }
+  .inv { color:#fff !important; }
+  .inv.c-claude{background:var(--claude)} .inv.c-suggestion{background:var(--suggestion)} .inv.c-warning{background:var(--warning)}
+  .inv.c-subtle{background:var(--subtle)} .inv.c-success{background:var(--success)}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Option 3: dynamic task section, 4 variants</h1>
+    <p>Each card is the whole pane at its real size (~42 columns, tall dock): task header, focus, usage and the live pipeline. Same data in all ten; only the design changes. States cycle thinking → tool → waiting → idle; idle never moves. Pick by number, or mix (e.g. "header of 3, usage of 7").</p>
+  </div>
+  <div class="ctl" id="ctl">
+    <button data-s="auto" aria-pressed="true">Auto</button>
+    <button data-s="thinking" aria-pressed="false">Thinking</button>
+    <button data-s="tool" aria-pressed="false">Tool</button>
+    <button data-s="waiting" aria-pressed="false">Waiting</button>
+    <button data-s="idle" aria-pressed="false">Idle</button>
+    <button id="pause" aria-pressed="false">Pause</button>
+  </div>
+</header>
+<main id="grid"></main>
+<script>
+const W = 42
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+const L = s => [...s].length
+const fit = (s, n) => L(s) > n ? [...s].slice(0, n - 1).join('') + '…' : s + ' '.repeat(n - L(s))
+const GLYPH = { reading: '≡', editing: '✎', searching: '⌕', running: '›_', testing: '✔' }
+const TOOLS = [['reading', 'deck-core.ts'], ['editing', 'deck.tsx'], ['searching', 'bodyRows'], ['running', 'git status'], ['testing', 'make check']]
+const COL = { thinking: 'c-claude', tool: 'c-suggestion', waiting: 'c-warning', idle: 'c-subtle' }
+const LVL = p => p >= 85 ? 'c-error' : p >= 60 ? 'c-warning' : 'c-success'
+const D = { task: 'Draw a 3-row you → model → tools pipeline in the deck pane', time: '3m', turns: 1, model: 'opus-5-5', effort: 'medium', lean: 'lean',
+  branch: 'main', diff: '±5', edited: 2, check: 'make check', checkAgo: '1m', focus: 6, ctx: 11, five: 70, fiveReset: '36m', week: 21, weekReset: '6d 0h', cost: '$2.12', tok: '148k',
+  ctxHist: [2, 3, 3, 4, 5, 5, 6, 7, 8, 9, 10, 11], fiveHist: [20, 24, 30, 33, 38, 41, 47, 52, 55, 60, 66, 70] }
+const spin = (f, st) => st === 'idle' ? '○' : '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'[f % 10]
+const word = (st, v, t) =>
+  st === 'thinking' ? [['thinking', 'c-claude b'], [' · 3.2k out', 'c-dim']]
+  : st === 'tool' ? [[v, 'c-suggestion b'], [' ' + t, 'c-text']]
+  : st === 'waiting' ? [['waiting on you', 'c-warning b'], [' · permission', 'c-dim']]
+  : [['idle', 'c-subtle'], [' · your next prompt', 'c-dim']]
+const bar = (p, n, on = '█', off = '░', c) => [[on.repeat(Math.round(p / 100 * n)), c || LVL(p)], [off.repeat(n - Math.round(p / 100 * n)), 'c-subtle']]
+const rule = (title, c, ch = '─') => [[title + ' ', c + ' b'], [ch.repeat(W - L(title) - 1), 'c-subtle']]
+const spark = (h, max) => h.map(x => '▁▂▃▄▅▆▇█'[Math.min(7, Math.floor(x / max * 8))]).join('')
+const gap = n => Array(n).fill([])
+const pad = (rows, n) => [...rows, ...gap(Math.max(0, n - rows.length))]
+const K = st => st === 'waiting' ? 0 : st === 'thinking' ? 1 : st === 'tool' ? 2 : -1
+const link = (n, ch, on, f, dir, head, c) => { if (!on) return [[ch.repeat(n), 'c-subtle']]
+  const i = dir > 0 ? f % n : n - 1 - (f % n); return [[ch.repeat(i), c], [head, c + ' b'], [ch.repeat(n - 1 - i), c]] }
+const H = 40 // rows in the pane
+
+// ── merge: calm sections (1) + boxes (3) with other borders + centred segmented bar ──
+const BORDERS = {
+  heavy:   { tl: '┏', tr: '┓', bl: '┗', br: '┛', h: '━', v: '┃' },
+  double:  { tl: '╔', tr: '╗', bl: '╚', br: '╝', h: '═', v: '║' },
+  dashed:  { tl: '┌', tr: '┐', bl: '└', br: '┘', h: '╌', v: '╎' },
+  thin:    { tl: '┌', tr: '┐', bl: '└', br: '┘', h: '─', v: '│' },
+  corners: { tl: '┌', tr: '┐', bl: '└', br: '┘', h: ' ', v: ' ' },
+  tab:     { tl: '▁', tr: '▁', bl: ' ', br: ' ', h: '▁', v: ' ', tab: true },
+  accent:  { tl: '▌', tr: ' ', bl: '▌', br: ' ', h: ' ', v: '▌', accent: true },
+  block:   { tl: '▛', tr: '▜', bl: '▙', br: '▟', h: '▀', hb: '▄', v: '▌', vr: '▐' },
+}
+// one section box; tc = the title's colour, bc = the border's colour (accent borders take the title colour)
+function box(B, title, tc, rows) {
+  const bc = B.accent ? tc : 'c-subtle', inner = W - 4
+  const body = rows.map(r => { const n = r.reduce((a, s) => a + L(s[0]), 0)
+    return [[B.v + ' ', bc], ...r, [' '.repeat(Math.max(0, inner - n)) + ' ' + (B.vr ?? B.v), B.accent ? '' : bc]] })
+  const top = B.tab ? [[' ' + title + ' ', 'inv ' + tc.split(' ')[0] + ' b'], ['▁'.repeat(W - L(title) - 2), 'c-subtle']]
+    : B.accent ? [[B.tl + ' ', bc], [title, tc + ' b']]
+    : [[B.tl + B.h + ' ', bc], [title, tc + ' b'], [' ' + B.h.repeat(W - L(title) - 5) + B.tr, bc]]
+  const bot = B.accent || B.tab ? [] : [[[B.bl + (B.hb ?? B.h).repeat(W - 2) + B.br, bc]]]
+  return [top, ...body, ...bot]
+}
+// the ▰▱ meter from option 1
+const meter = (n, p, x = '') => [[fit(n, 8), 'c-dim'], ['▰'.repeat(Math.round(p / 6.25)), LVL(p)], ['▱'.repeat(16 - Math.round(p / 6.25)), 'c-subtle'], [(' ' + p + '%').padStart(5), LVL(p) + ' b'], [' ' + x, 'c-dim']]
+const centre = (segs, w = W) => { const n = segs.reduce((a, s) => a + L(s[0]), 0); return [[' '.repeat(Math.max(0, (w - n) >> 1)), ''], ...segs] }
+// the segmented bar, centred; style picks the cells
+const SEG = {
+  block:  { on: '█', hi: '▓', off: '█' },
+  thin:   { on: '━', hi: '╸', off: '━' },
+  pill:   { on: '▰', hi: '▱', off: '▱' },
+  dots:   { on: '●', hi: '○', off: '·' },
+}
+function segbar(S, st, f, n = 10, inside = false) {
+  const k = K(st), nm = ['you', 'model', 'tools']
+  const seg = i => { if (i !== k) return [[S.off.repeat(n), 'c-subtle']]
+    if (inside) { const lab = fit(' ' + nm[i], n); return [[lab, 'inv ' + COL[st] + ' b']] }
+    return [[[...Array(n)].map((_, j) => (j === f % n || j === (f + 1) % n) ? S.hi : S.on).join(''), COL[st]]] }
+  const bar = [...seg(0), [' ', ''], ...seg(1), [' ', ''], ...seg(2)]
+  const labels = [0, 1, 2].flatMap(i => [[fit(nm[i], n) + (i < 2 ? ' ' : ''), i === k ? COL[st] + ' b' : 'c-dim']])
+  return inside ? [centre(bar)] : [centre(labels), centre(bar)]
+}
+const now = (st, f, v, t) => centre([[spin(f, st) + ' ', COL[st]], ...word(st, v, t)])
+
+function make(B, S, o = {}) {
+  return (st, f, v, t) => {
+    const g = o.gap ? [[]] : []
+    const top = [
+      ...box(B, 'task', 'c-claude', [[['✔ ', 'c-success'], [fit(D.task, W - 6), 'b']],
+        [[`${D.time} · ${D.turns} turn · `, 'c-dim'], [D.model, 'c-claude'], [` · ${D.effort} · ⎇ ${D.branch} `, 'c-dim'], [D.diff, 'c-warning']],
+        [[`✎ ${D.edited} edited · `, 'c-dim'], ['✔ ' + D.check, 'c-success'], [' ' + D.checkAgo + ' ago', 'c-dim']]]), ...g,
+      ...box(B, '◇ focus', 'c-success', [[['on task ', 'c-success b'], ['▰'.repeat(1), 'c-success'], ['▱'.repeat(15), 'c-subtle'], [' drift ' + D.focus + '%', 'c-dim']]]), ...g,
+      ...box(B, '◷ usage', 'c-suggestion', [meter('context', D.ctx), meter('5h', D.five, '↻' + D.fiveReset), meter('week', D.week, '↻' + D.weekReset), [[`${D.cost} · ${D.tok} tok`, 'c-dim']]]),
+    ]
+    const bar = segbar(S, st, f, o.n ?? 10, o.inside)
+    const pipe = o.boxed ? box(B, '▸ now', COL[st], [...bar, now(st, f, v, t)].map(r => centre(r.slice(1), W - 4)))
+      : [...bar, [], now(st, f, v, t)]
+    return o.bottom === false ? pad([...top, [], ...pipe], H) : [...pad(top, H - pipe.length), ...pipe]
+  }
+}
+
+
+// ── dynamic task section: goal wraps, a live "now" line, clear model / effort / lean ──
+const GOAL = 'Draw a 3-row you → model → tools pipeline in the deck pane, showing the live state'
+const wrap = (s, n) => { const out = []; let cur = ''
+  for (const w of s.split(' ')) { if (L(cur) + L(w) + 1 > n && cur) { out.push(cur); cur = w } else cur = cur ? cur + ' ' + w : w }
+  return [...out, cur] }
+const doing = (st, f, v, t) => st === 'tool' ? [[GLYPH[v] + ' ', 'c-suggestion b'], [v + ' ', 'c-suggestion b'], [t, 'c-text']]
+  : st === 'thinking' ? [[spin(f, st) + ' ', 'c-claude'], ['writing', 'c-claude b'], [' · 3.2k out', 'c-dim']]
+  : st === 'waiting' ? [['? ', 'c-warning b'], ['waiting on you', 'c-warning b'], [' · permission', 'c-dim']]
+  : [['○ ', 'c-subtle'], ['idle', 'c-subtle'], [' · your next prompt', 'c-dim']]
+const EFF = { low: 1, medium: 2, high: 3, xhigh: 4 }
+const effBar = (e, c = 'c-claude') => [['▰'.repeat(EFF[e]), c], ['▱'.repeat(4 - EFF[e]), 'c-subtle']]
+const goalRows = n => wrap(GOAL, W - 6).slice(0, n).map((l, i) => [[i ? '  ' : '◎ ', 'c-claude b'], [l, 'b']])
+const meta = [[`${D.time} · turn ${D.turns} · ⎇ ${D.branch} `, 'c-dim'], [D.diff, 'c-warning'], [` · ✎ ${D.edited} · `, 'c-dim'], ['✔ checks', 'c-success']]
+const TASKS = {
+  chips: (st, f, v, t) => [...goalRows(2), [], [['now  ', 'c-dim'], ...doing(st, f, v, t)], [],
+    [[' ' + D.model + ' ', 'inv c-claude b'], [' ', ''], [' ' + D.effort + ' ', 'inv c-suggestion b'], [' ', ''], [' ' + D.lean + ' ', 'inv c-success b']], meta],
+  keys: (st, f, v, t) => [...goalRows(2), [['now     ', 'c-dim'], ...doing(st, f, v, t)], [],
+    [['model   ', 'c-dim'], [D.model, 'c-claude b']], [['effort  ', 'c-dim'], ...effBar(D.effort), [' ' + D.effort, 'c-text b']], [['lean    ', 'c-dim'], ['● on', 'c-success b'], [' · lite / full', 'c-subtle']], meta],
+  grid: (st, f, v, t) => [...goalRows(2), [],
+    [['MODEL         EFFORT     LEAN', 'c-subtle']], [[fit(D.model, 14), 'c-claude b'], ...effBar(D.effort), [fit(' ' + D.effort, 7), 'c-text b'], ['on', 'c-success b']], [],
+    [['▸ ', COL[st] + ' b'], ...doing(st, f, v, t).slice(1)], meta],
+  steps: (st, f, v, t) => [...goalRows(2), [['step 2/5 ', 'c-dim'], ['▰▰', 'c-success'], ['▱▱▱', 'c-subtle'], [' add pipeline()', 'c-text']], [['  └ ', 'c-subtle'], ...doing(st, f, v, t)], [],
+    [['◆ ', 'c-claude'], [D.model, 'c-claude b'], ['  ', ''], ...effBar(D.effort, 'c-suggestion'), [' ' + D.effort, 'c-suggestion b'], ['  ⚡ ' + D.lean, 'c-success b']], meta],
+}
+function make3(task) {
+  const B = BORDERS.dashed, S = SEG.pill
+  return (st, f, v, t) => {
+    const top = [...box(B, 'task', 'c-claude', task(st, f, v, t)),
+      ...box(B, '◇ focus', 'c-success', [[['on task ', 'c-success b'], ['▰', 'c-success'], ['▱'.repeat(15), 'c-subtle'], [' drift ' + D.focus + '%', 'c-dim']]]),
+      ...box(B, '◷ usage', 'c-suggestion', [meter('context', D.ctx), meter('5h', D.five, '↻' + D.fiveReset), meter('week', D.week, '↻' + D.weekReset), [[`${D.cost} · ${D.tok} tok`, 'c-dim']]])]
+    const pipe = [...segbar(S, st, f, 10), [], now(st, f, v, t)]
+    return [...pad(top, H - pipe.length), ...pipe]
+  }
+}
+const OPTIONS = [
+  { name: 'Chips', note: 'Goal wraps to two lines; a live "now" line; model, effort and lean as three filled chips.', fn: make3(TASKS.chips) },
+  { name: 'Key / value', note: 'One row each for model, effort (▰▰▱▱ level) and lean, labelled. Most explicit.', fn: make3(TASKS.keys) },
+  { name: 'Header grid', note: 'Model / effort / lean as a small table with column headings; "now" line under it.', fn: make3(TASKS.grid) },
+  { name: 'Goal + step', note: 'Shows progress toward the goal (step 2/5 from the todo list) with the current action under it; model line is compact.', fn: make3(TASKS.steps) },
+]
+const grid = document.getElementById('grid')
+const pres = OPTIONS.map((o, i) => {
+  const el = document.createElement('div'); el.className = 'card'
+  el.innerHTML = `<h2><span class="n">${i + 1}</span>${esc(o.name)}</h2><p class="note">${esc(o.note)}</p><pre></pre>`
+  grid.appendChild(el); return el.querySelector('pre')
+})
+const row = segs => segs.map(([t, c]) => `<span class="${c || ''}">${esc(t)}</span>`).join('')
+const STATES = ['thinking', 'tool', 'waiting', 'idle']
+let mode = 'auto', paused = false, f = 0, hist = Array(W).fill('idle'), log = TOOLS.slice()
+function draw() {
+  const st = mode === 'auto' ? STATES[Math.floor(f / 40) % 4] : mode
+  const [v, tgt] = TOOLS[Math.floor(f / 20) % TOOLS.length]
+  if (f % 4 === 0) hist = [...hist.slice(1), st]
+  if (f % 20 === 0 && st === 'tool') log = [...log, [v, tgt]].slice(-8)
+  OPTIONS.forEach((o, i) => {
+    try { pres[i].innerHTML = o.fn(st, f, v, tgt, hist, log).map(row).join('\n') }
+    catch (e) { pres[i].textContent = 'error: ' + e.message }
+  })
+}
+setInterval(() => { if (!paused) { f++; draw() } }, 120)
+draw()
+document.getElementById('ctl').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return
+  if (b.id === 'pause') { paused = !paused; b.setAttribute('aria-pressed', String(paused)); return }
+  mode = b.dataset.s
+  document.querySelectorAll('[data-s]').forEach(x => x.setAttribute('aria-pressed', String(x === b)))
+  draw()
+})
+</script>
+</body>
+</html>

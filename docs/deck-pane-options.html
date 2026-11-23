@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>helm deck: 10 full-pane redesigns</title>
+<style>
+  :root { --bg:#e4e4e8; --pane:#f4f4f4; --line:#d6d6da; --text:#2a2a2e; --dim:#77777f;
+    --claude:#c8623f; --success:#2e7d3e; --warning:#9a7221; --error:#c0392b; --suggestion:#5462d6; --subtle:#b4b4ba; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, sans-serif; padding:24px; }
+  header { max-width:1400px; margin:0 auto 20px; display:flex; flex-wrap:wrap; gap:12px 24px; align-items:end; justify-content:space-between; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  header p { margin:0; color:var(--dim); max-width:700px; }
+  .ctl { display:flex; flex-wrap:wrap; gap:8px; }
+  button { background:#fff; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+  button[aria-pressed="true"] { border-color:var(--claude); color:var(--claude); }
+  main { max-width:1400px; margin:0 auto; display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 430px), 1fr)); gap:18px; }
+  .card h2 { font-size:15px; margin:0 0 2px; display:flex; gap:8px; align-items:baseline; }
+  .card h2 .n { color:var(--claude); }
+  .card .note { color:var(--dim); font-size:13px; margin:0 0 8px; min-height:2.9em; }
+  pre { margin:0; height:560px; background:var(--pane); border-left:2px solid #6b78f0; padding:12px 14px; overflow:hidden;
+    font:13px/1.32 "JetBrains Mono", "DejaVu Sans Mono", monospace; color:var(--text); box-shadow:0 1px 3px #0001; }
+  .c-claude{color:var(--claude)} .c-success{color:var(--success)} .c-warning{color:var(--warning)} .c-error{color:var(--error)}
+  .c-suggestion{color:var(--suggestion)} .c-subtle{color:var(--subtle)} .c-dim{color:var(--dim)} .c-text{color:var(--text)}
+  .b { font-weight:700; }
+  .inv { color:#fff !important; }
+  .inv.c-claude{background:var(--claude)} .inv.c-suggestion{background:var(--suggestion)} .inv.c-warning{background:var(--warning)}
+  .inv.c-subtle{background:var(--subtle)} .inv.c-success{background:var(--success)}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Deck pane: 10 full redesigns</h1>
+    <p>Each card is the whole pane at its real size (~42 columns, tall dock): task header, focus, usage and the live pipeline. Same data in all ten; only the design changes. States cycle thinking → tool → waiting → idle; idle never moves. Pick by number, or mix (e.g. "header of 3, usage of 7").</p>
+  </div>
+  <div class="ctl" id="ctl">
+    <button data-s="auto" aria-pressed="true">Auto</button>
+    <button data-s="thinking" aria-pressed="false">Thinking</button>
+    <button data-s="tool" aria-pressed="false">Tool</button>
+    <button data-s="waiting" aria-pressed="false">Waiting</button>
+    <button data-s="idle" aria-pressed="false">Idle</button>
+    <button id="pause" aria-pressed="false">Pause</button>
+  </div>
+</header>
+<main id="grid"></main>
+<script>
+const W = 42
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+const L = s => [...s].length
+const fit = (s, n) => L(s) > n ? [...s].slice(0, n - 1).join('') + '…' : s + ' '.repeat(n - L(s))
+const GLYPH = { reading: '≡', editing: '✎', searching: '⌕', running: '›_', testing: '✔' }
+const TOOLS = [['reading', 'deck-core.ts'], ['editing', 'deck.tsx'], ['searching', 'bodyRows'], ['running', 'git status'], ['testing', 'make check']]
+const COL = { thinking: 'c-claude', tool: 'c-suggestion', waiting: 'c-warning', idle: 'c-subtle' }
+const LVL = p => p >= 85 ? 'c-error' : p >= 60 ? 'c-warning' : 'c-success'
+const D = { task: 'Draw a 3-row you → model → tools pipeline in the deck pane', time: '3m', turns: 1, model: 'opus-5-5', effort: 'medium', lean: 'lean',
+  branch: 'main', diff: '±5', edited: 2, check: 'make check', checkAgo: '1m', focus: 6, ctx: 11, five: 70, fiveReset: '36m', week: 21, weekReset: '6d 0h', cost: '$2.12', tok: '148k',
+  ctxHist: [2, 3, 3, 4, 5, 5, 6, 7, 8, 9, 10, 11], fiveHist: [20, 24, 30, 33, 38, 41, 47, 52, 55, 60, 66, 70] }
+const spin = (f, st) => st === 'idle' ? '○' : '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'[f % 10]
+const word = (st, v, t) =>
+  st === 'thinking' ? [['thinking', 'c-claude b'], [' · 3.2k out', 'c-dim']]
+  : st === 'tool' ? [[v, 'c-suggestion b'], [' ' + t, 'c-text']]
+  : st === 'waiting' ? [['waiting on you', 'c-warning b'], [' · permission', 'c-dim']]
+  : [['idle', 'c-subtle'], [' · your next prompt', 'c-dim']]
+const bar = (p, n, on = '█', off = '░', c) => [[on.repeat(Math.round(p / 100 * n)), c || LVL(p)], [off.repeat(n - Math.round(p / 100 * n)), 'c-subtle']]
+const rule = (title, c, ch = '─') => [[title + ' ', c + ' b'], [ch.repeat(W - L(title) - 1), 'c-subtle']]
+const spark = (h, max) => h.map(x => '▁▂▃▄▅▆▇█'[Math.min(7, Math.floor(x / max * 8))]).join('')
+const gap = n => Array(n).fill([])
+const pad = (rows, n) => [...rows, ...gap(Math.max(0, n - rows.length))]
+const K = st => st === 'waiting' ? 0 : st === 'thinking' ? 1 : st === 'tool' ? 2 : -1
+const link = (n, ch, on, f, dir, head, c) => { if (!on) return [[ch.repeat(n), 'c-subtle']]
+  const i = dir > 0 ? f % n : n - 1 - (f % n); return [[ch.repeat(i), c], [head, c + ' b'], [ch.repeat(n - 1 - i), c]] }
+const H = 40 // rows in the pane
+
+const OPTIONS = [
+  { name: 'Calm sections', note: 'Your current layout, tidied: one meta line, thin ▰▱ bars, right-aligned numbers, the pipeline as a rail pinned to the bottom.', fn: (st, f, v, t) => {
+    const m = (n, p, extra) => [[fit(n, 8), 'c-dim'], [('▰'.repeat(Math.round(p / 5))), LVL(p)], ['▱'.repeat(20 - Math.round(p / 5)), 'c-subtle'], [(' ' + p + '%').padStart(5), LVL(p) + ' b'], [' ' + extra, 'c-dim']]
+    const top = [[['✔ ', 'c-success'], [fit(D.task, W - 2), 'b']], [[`${D.time} · ${D.turns} turn · `, 'c-dim'], [D.model, 'c-claude'], [` · ${D.effort} · ${D.lean} · ⎇ ${D.branch} `, 'c-dim'], [D.diff, 'c-warning']],
+      [[`✎ ${D.edited} edited · `, 'c-dim'], ['✔ ' + D.check, 'c-success'], [' ' + D.checkAgo + ' ago', 'c-dim']], [],
+      rule('◇ focus', 'c-success'), [['on task ', 'c-success b'], ...bar(D.focus, 20, '▰', '▱', 'c-success'), [' drift ' + D.focus + '%', 'c-dim']], [],
+      rule('◷ usage', 'c-suggestion'), m('context', D.ctx, ''), m('5h', D.five, '↻' + D.fiveReset), m('week', D.week, '↻' + D.weekReset), [[`${D.cost} · ${D.tok} tok`, 'c-dim']]]
+    const pipe = [rule('▸ now', COL[st]), [['you ', K(st) === 0 ? 'c-warning b' : 'c-dim'], ...link(9, '━', K(st) <= 1 && K(st) >= 0, f, st === 'waiting' ? -1 : 1, '◆', COL[st]), [' model ', K(st) === 1 ? 'c-claude b' : 'c-dim'], ...link(9, '━', st === 'tool', f, 1, '◆', 'c-suggestion'), [' tools', K(st) === 2 ? 'c-suggestion b' : 'c-dim']], [[spin(f, st) + ' ', COL[st]], ...word(st, v, t)]]
+    return [...pad(top, H - pipe.length), ...pipe] } },
+
+  { name: 'Big-number tiles', note: 'Usage as three tiles with large percentages; the state banner on top is the first thing you see.', fn: (st, f, v, t) => {
+    const tile = [D.ctx, D.five, D.week], nm = ['context', '5h', 'week'], sub = ['of window', '↻' + D.fiveReset, '↻' + D.weekReset]
+    const big = p => fit(' ' + p + '%', 12)
+    return pad([
+      [[' ' + spin(f, st) + ' ', 'inv ' + COL[st] + ' b'], [fit(' ' + word(st, v, t).map(x => x[0]).join(''), W - 3), 'inv ' + COL[st] + ' b']], [],
+      [[fit(D.task, W), 'b']], [[`${D.model} · ${D.effort} · ${D.lean} · ${D.time} · turn ${D.turns}`, 'c-dim']], [],
+      [['┌────────────┬────────────┬────────────┐', 'c-subtle']],
+      [['│', 'c-subtle'], ...nm.flatMap(n => [[fit(' ' + n, 12), 'c-dim'], ['│', 'c-subtle']])],
+      [['│', 'c-subtle'], ...tile.flatMap(p => [[big(p), LVL(p) + ' b'], ['│', 'c-subtle']])],
+      [['│', 'c-subtle'], ...tile.flatMap(p => [[' ', ''], ...bar(p, 10, '━', '━'), [' ', ''], ['│', 'c-subtle']])],
+      [['│', 'c-subtle'], ...sub.flatMap(n => [[fit(' ' + n, 12), 'c-dim'], ['│', 'c-subtle']])],
+      [['└────────────┴────────────┴────────────┘', 'c-subtle']], [],
+      [['focus ', 'c-dim'], ['● on task', 'c-success b'], ['   spend ', 'c-dim'], [D.cost, 'b'], [' · ' + D.tok, 'c-dim']],
+      [['git   ', 'c-dim'], ['⎇ ' + D.branch + ' ', ''], [D.diff, 'c-warning'], [' · ✎ ' + D.edited + ' · ', 'c-dim'], ['✔ checks', 'c-success']], [],
+      [['you › model › tools  ', 'c-dim'], ...[0, 1, 2].map(i => [i === K(st) ? '●' : '○', i === K(st) ? COL[st] + ' b' : 'c-subtle'])],
+    ], H) } },
+
+  { name: 'Boxed panels', note: 'Each section in its own rounded box with the title in the border. Pipeline as three boxes at the bottom.', fn: (st, f, v, t) => {
+    const box = (title, c, rows) => [[['╭─ ', 'c-subtle'], [title, c + ' b'], [' ' + '─'.repeat(W - L(title) - 5) + '╮', 'c-subtle']],
+      ...rows.map(r => { const n = r.reduce((a, s) => a + L(s[0]), 0); return [['│ ', 'c-subtle'], ...r, [' '.repeat(Math.max(0, W - 4 - n)) + ' │', 'c-subtle']] }),
+      [['╰' + '─'.repeat(W - 2) + '╯', 'c-subtle']]]
+    const m = (n, p, x) => [[fit(n, 8), 'c-dim'], ...bar(p, 18, '█', '░'), [(' ' + p + '%').padStart(5), LVL(p) + ' b'], [' ' + fit(x, 6), 'c-dim']]
+    const c = i => i === K(st) ? COL[st] + ' b' : 'c-subtle'
+    const mid = [st === 'waiting' && f % 6 < 3 ? '  ?  ' : ' you ', st === 'thinking' ? '  ' + spin(f, st) + '  ' : 'model', st === 'tool' ? fit('  ' + GLYPH[v], 5) : 'tools']
+    const arrow = on => on ? [['─'.repeat(f % 5) + '▸' + '─'.repeat(4 - f % 5), COL[st] + ' b']] : [['─────', 'c-subtle']]
+    const pipe = [[0, 1, 2].flatMap(i => [['╭─────╮', c(i)], [i < 2 ? '      ' : '', '']]),
+      [0, 1, 2].flatMap(i => [['│' + mid[i] + '│', c(i)], ...(i < 2 ? [[' ', ''], ...arrow(i === 0 ? K(st) === 0 || K(st) === 1 : K(st) === 2)] : [])]),
+      [0, 1, 2].flatMap(i => [['╰─────╯', c(i)], [i < 2 ? '      ' : '', '']]), [['  ', ''], ...word(st, v, t)]]
+    const top = [...box('task', 'c-claude', [[['✔ ', 'c-success'], [fit(D.task, W - 6), 'b']], [[`${D.time} · ${D.model} · ${D.effort} · ⎇ ${D.branch} ${D.diff}`, 'c-dim']]]),
+      ...box('focus', 'c-success', [[['on task', 'c-success b'], ['  drift ' + D.focus + '%', 'c-dim']]]),
+      ...box('usage', 'c-suggestion', [m('context', D.ctx, ''), m('5h', D.five, '↻' + D.fiveReset), m('week', D.week, '↻6d'), [[`${D.cost} · ${D.tok} tok`, 'c-dim']]])]
+    return [...pad(top, H - pipe.length), ...pipe] } },
+
+  { name: 'Sparkline history', note: 'Bars replaced by trends: each meter shows its last 12 samples as a sparkline, so you see direction, not just level.', fn: (st, f, v, t) => pad([
+    [['● ', COL[st] + ' b'], [fit(D.task, W - 2), 'b']], [['  ' + D.model, 'c-claude'], [` ${D.effort} · ${D.time} · ⎇ ${D.branch} `, 'c-dim'], [D.diff, 'c-warning']], [],
+    [['  context  ', 'c-dim'], [spark(D.ctxHist, 100), 'c-success'], ['  ' + D.ctx + '%', 'c-success b']],
+    [['  5h       ', 'c-dim'], [spark(D.fiveHist, 100), 'c-warning'], ['  ' + D.five + '%', 'c-warning b'], [' ↻' + D.fiveReset, 'c-dim']],
+    [['  week     ', 'c-dim'], [spark([12, 13, 14, 15, 16, 17, 17, 18, 19, 20, 21, 21], 100), 'c-success'], ['  ' + D.week + '%', 'c-success b']],
+    [['  focus    ', 'c-dim'], [spark([2, 3, 2, 4, 5, 3, 6, 5, 4, 6, 6, 6], 100), 'c-success'], ['  on task', 'c-success b']], [],
+    [['  spend ', 'c-dim'], [D.cost, 'b'], ['  ·  ' + D.tok + ' tok  ·  ✔ checks', 'c-dim']], [],
+    [['  ', ''], ['you', K(st) === 0 ? 'c-warning b' : 'c-dim'], [' ', ''], ...link(8, '·', K(st) === 0 || K(st) === 1, f, st === 'waiting' ? -1 : 1, '●', COL[st]), [' model ', K(st) === 1 ? 'c-claude b' : 'c-dim'], ...link(8, '·', K(st) === 2, f, 1, '●', 'c-suggestion'), [' tools', K(st) === 2 ? 'c-suggestion b' : 'c-dim']],
+    [['  ' + spin(f, st) + ' ', COL[st]], ...word(st, v, t)]], H) },
+
+  { name: 'Vertical rail', note: 'A left-hand timeline spine ties everything together; the pipeline runs down the spine as you → model → tools.', fn: (st, f, v, t) => {
+    const sp = c => [' │ ', c || 'c-subtle']
+    const node = (on, c) => [' ◉ ', on ? c + ' b' : 'c-subtle']
+    const drop = (on, dir, c) => [0, 1].map(i => [[' ' + (on && (dir > 0 ? f % 2 : 1 - f % 2) === i ? '●' : '│') + ' ', on ? c + ' b' : 'c-subtle']])
+    return pad([
+      [[' ◆ ', 'c-claude b'], [fit(D.task, W - 3), 'b']], [sp(), [`${D.time} · ${D.model} · ${D.effort} · ${D.lean}`, 'c-dim']], [sp(), [`⎇ ${D.branch} ${D.diff} · ✎ ${D.edited} · ✔ ${D.check}`, 'c-dim']], [sp()],
+      [[' ◇ ', 'c-success b'], ['focus  ', 'c-dim'], ['on task', 'c-success b']], [sp()],
+      [[' ◷ ', 'c-suggestion b'], ['usage', 'c-suggestion b']],
+      [sp(), ['context ', 'c-dim'], ...bar(D.ctx, 18, '■', '·'), [' ' + D.ctx + '%', LVL(D.ctx) + ' b']],
+      [sp(), ['5h      ', 'c-dim'], ...bar(D.five, 18, '■', '·'), [' ' + D.five + '%', LVL(D.five) + ' b'], [' ↻' + D.fiveReset, 'c-dim']],
+      [sp(), ['week    ', 'c-dim'], ...bar(D.week, 18, '■', '·'), [' ' + D.week + '%', LVL(D.week) + ' b']],
+      [sp(), [`${D.cost} · ${D.tok} tok`, 'c-dim']], [sp()],
+      [node(K(st) === 0, 'c-warning'), ['you', K(st) === 0 ? 'c-warning b' : 'c-dim'], [st === 'waiting' && f % 6 < 3 ? '  ? permission' : '', 'c-warning']],
+      ...drop(K(st) === 0 || K(st) === 1, st === 'waiting' ? -1 : 1, COL[st]),
+      [node(K(st) === 1, 'c-claude'), ['model', K(st) === 1 ? 'c-claude b' : 'c-dim'], [st === 'thinking' ? '  ' + spin(f, st) + ' 3.2k out' : '', 'c-dim']],
+      ...drop(K(st) === 2, 1, 'c-suggestion'),
+      [node(K(st) === 2, 'c-suggestion'), ['tools', K(st) === 2 ? 'c-suggestion b' : 'c-dim'], [st === 'tool' ? `  ${GLYPH[v]} ${v} ${t}` : '', 'c-text']],
+      [sp()], [['   ', ''], ...word(st, v, t)]], H) } },
+
+  { name: 'Dot leaders', note: 'Typographic and quiet: label ……… value rows like a receipt, no bars at all. Colour only flags levels and the live state.', fn: (st, f, v, t) => {
+    const row = (k, val, c = 'c-text') => [[k + ' ', 'c-dim'], ['.'.repeat(W - L(k) - L(val) - 2), 'c-subtle'], [' ' + val, c + ' b']]
+    return pad([
+      [[fit(D.task, W), 'b']], [[`${D.model} · ${D.effort} · ${D.lean}`, 'c-dim']], [],
+      [['SESSION', 'c-dim b']], row('elapsed', D.time), row('turns', '' + D.turns), row('branch', D.branch + ' ' + D.diff), row('files edited', '' + D.edited), row('checks', '✔ pass', 'c-success'), [],
+      [['FOCUS', 'c-dim b']], row('topic', 'on task', 'c-success'), [],
+      [['USAGE', 'c-dim b']], row('context', D.ctx + '%', LVL(D.ctx)), row('5h  ↻' + D.fiveReset, D.five + '%', LVL(D.five)), row('week  ↻' + D.weekReset, D.week + '%', LVL(D.week)), row('spend', D.cost), row('tokens', D.tok), [],
+      [['NOW', 'c-dim b']], row(spin(f, st) + ' ' + (['you', 'model', 'tools'][K(st)] ?? 'nobody'), word(st, v, t)[0][0], COL[st]), [[st === 'tool' ? '  ' + t : '', 'c-dim']]], H) } },
+
+  { name: 'Status banner + compact', note: 'A full-width coloured banner shows the live state; everything else is a dense 6-line summary. Most free space left for the conversation.', fn: (st, f, v, t) => {
+    const ph = word(st, v, t).map(x => x[0]).join('')
+    return pad([
+      [[fit(` ${spin(f, st)} ${ph}`, W), 'inv ' + COL[st] + ' b']],
+      [[fit(['  ▲ you', '  ● model', '  ▶ tools'][K(st)] ?? '  — waiting for a prompt', W), 'inv ' + COL[st]]], [],
+      [[fit(D.task, W), 'b']],
+      [['ctx ', 'c-dim'], ...bar(D.ctx, 6), [' ' + D.ctx + '%  ', 'c-success b'], ['5h ', 'c-dim'], ...bar(D.five, 6), [' ' + D.five + '%  ', 'c-warning b'], ['wk ', 'c-dim'], [D.week + '%', 'c-success b']],
+      [[`${D.cost} · ${D.tok} · ↻${D.fiveReset} · `, 'c-dim'], ['on task', 'c-success']],
+      [[`${D.model} ${D.effort} · ⎇ ${D.branch} `, 'c-dim'], [D.diff, 'c-warning'], [' · ✔ checks', 'c-success']]], H) } },
+
+  { name: 'Gauge columns', note: 'Usage as vertical columns like an equaliser, side by side; reads as a glance from across the screen.', fn: (st, f, v, t) => {
+    const vals = [D.ctx, D.five, D.week, D.focus], nm = [' ctx ', ' 5h  ', ' week', ' drft'], h = 8
+    const col = r => vals.flatMap(p => { const fill = Math.round(p / 100 * h) >= h - r; return [[fill ? ' ███ ' : ' ░░░ ', fill ? LVL(p) : 'c-subtle'], ['  ', '']] })
+    return pad([
+      [[D.model + ' ', 'c-claude b'], [`${D.effort} · ${D.time} · turn ${D.turns}`, 'c-dim']], [[fit(D.task, W), 'b']], [],
+      ...Array.from({ length: h }, (_, r) => col(r)),
+      vals.flatMap((p, i) => [[nm[i], 'c-dim'], ['  ', '']]),
+      vals.flatMap(p => [[fit((' ' + p + '%'), 5), LVL(p) + ' b'], ['  ', '']]), [],
+      [[`${D.cost} · ${D.tok} · ↻ 5h in ${D.fiveReset}`, 'c-dim']], [],
+      [['┤', 'c-subtle'], ['you', K(st) === 0 ? 'inv c-warning b' : 'c-dim'], ['├', 'c-subtle'], ...link(8, '─', K(st) === 0 || K(st) === 1, f, st === 'waiting' ? -1 : 1, '▶', COL[st]), ['┤', 'c-subtle'], ['model', K(st) === 1 ? 'inv c-claude b' : 'c-dim'], ['├', 'c-subtle'], ...link(8, '─', K(st) === 2, f, 1, '▶', 'c-suggestion'), ['┤', 'c-subtle'], ['tools', K(st) === 2 ? 'inv c-suggestion b' : 'c-dim'], ['├', 'c-subtle']],
+      [[spin(f, st) + ' ', COL[st]], ...word(st, v, t)]], H) } },
+
+  { name: 'Activity first', note: 'Built around what happened: a scrolling strip of the last minute (who had the ball) and a short log; usage folded into one line.', fn: (st, f, v, t, hist, log) => pad([
+    [[fit(D.task, W), 'b']], [[`${D.time} · ${D.model} · ⎇ ${D.branch} ${D.diff}`, 'c-dim']], [],
+    rule('activity', COL[st]), hist.map(x => ['▮', COL[x]]),
+    [['▮ you  ', 'c-warning'], ['▮ model  ', 'c-claude'], ['▮ tools  ', 'c-suggestion'], ['▮ idle', 'c-subtle']], [],
+    ...log.slice(-8).map(([w, x]) => [[' ' + GLYPH[w] + ' ', 'c-suggestion'], [fit(w + ' ' + x, W - 3), 'c-dim']]), [],
+    [[' ' + spin(f, st) + ' ', COL[st]], ...word(st, v, t)], [],
+    rule('usage', 'c-dim'), [['ctx ', 'c-dim'], [D.ctx + '%', 'c-success b'], ['  5h ', 'c-dim'], [D.five + '%', 'c-warning b'], [' ↻' + D.fiveReset, 'c-dim'], ['  wk ', 'c-dim'], [D.week + '%', 'c-success b'], ['  ' + D.cost, 'c-dim']]], H) },
+
+  { name: 'Monochrome + accent', note: 'Grey everywhere; the only colour on screen is the live state and anything over 60%. The calmest option.', fn: (st, f, v, t) => {
+    const m = (n, p, x = '') => [[fit(n, 8), 'c-dim'], ['━'.repeat(Math.round(p / 5)), p >= 60 ? LVL(p) : 'c-text'], ['━'.repeat(20 - Math.round(p / 5)), 'c-subtle'], [(' ' + p + '%').padStart(5), p >= 60 ? LVL(p) + ' b' : 'c-text'], [' ' + x, 'c-dim']]
+    const pipe = [[], [[' ' + ['you', 'model', 'tools'].map((n, i) => i === K(st) ? `[${n}]` : ` ${n} `).join('  ·  '), 'c-dim']],
+      [[' ' + spin(f, st) + ' ', COL[st] + ' b'], ...word(st, v, t).map(([a, c]) => [a, c.includes('b') ? COL[st] + ' b' : 'c-dim'])]]
+    const top = [[[fit(D.task, W), 'b']], [[`${D.time}  ${D.model}  ${D.effort}  ${D.branch} ${D.diff}  ✔`, 'c-dim']], [], [['─'.repeat(W), 'c-subtle']], [],
+      m('context', D.ctx), m('5h', D.five, '↻' + D.fiveReset), m('week', D.week, '↻6d'), m('drift', D.focus), [], [[`${D.cost}  ${D.tok} tok`, 'c-dim']], [], [['─'.repeat(W), 'c-subtle']]]
+    return [...pad(top, H - pipe.length), ...pipe] } },
+]
+
+const grid = document.getElementById('grid')
+const pres = OPTIONS.map((o, i) => {
+  const el = document.createElement('div'); el.className = 'card'
+  el.innerHTML = `<h2><span class="n">${i + 1}</span>${esc(o.name)}</h2><p class="note">${esc(o.note)}</p><pre></pre>`
+  grid.appendChild(el); return el.querySelector('pre')
+})
+const row = segs => segs.map(([t, c]) => `<span class="${c || ''}">${esc(t)}</span>`).join('')
+const STATES = ['thinking', 'tool', 'waiting', 'idle']
+let mode = 'auto', paused = false, f = 0, hist = Array(W).fill('idle'), log = TOOLS.slice()
+function draw() {
+  const st = mode === 'auto' ? STATES[Math.floor(f / 40) % 4] : mode
+  const [v, tgt] = TOOLS[Math.floor(f / 20) % TOOLS.length]
+  if (f % 4 === 0) hist = [...hist.slice(1), st]
+  if (f % 20 === 0 && st === 'tool') log = [...log, [v, tgt]].slice(-8)
+  OPTIONS.forEach((o, i) => {
+    try { pres[i].innerHTML = o.fn(st, f, v, tgt, hist, log).map(row).join('\n') }
+    catch (e) { pres[i].textContent = 'error: ' + e.message }
+  })
+}
+setInterval(() => { if (!paused) { f++; draw() } }, 120)
+draw()
+document.getElementById('ctl').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return
+  if (b.id === 'pause') { paused = !paused; b.setAttribute('aria-pressed', String(paused)); return }
+  mode = b.dataset.s
+  document.querySelectorAll('[data-s]').forEach(x => x.setAttribute('aria-pressed', String(x === b)))
+  draw()
+})
+</script>
+</body>
+</html>
