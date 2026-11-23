@@ -32,7 +32,6 @@ export type DeckData = {
   agents?: DeckAgent[]
   checks?: DeckCheck[]
   todos?: DeckTodo[]
-  ctxParts?: { name: string; tokens: number }[]
   ctxSeries?: number[]
   fiveSeries?: FiveSample[]
   /** The current 5h window's reset time, ms. */
@@ -231,32 +230,14 @@ export function driftGauge(p: number, w: number): Line[] {
 /** Meters share one bar length: a fixed value column, so bars start and end together. Narrow panes shrink both columns. */
 const VALUE_W = 14
 const SHORT: Record<string, string> = { context: 'ctx', week: 'wk' }
-function meter(label: string, p: number, w: number, c: string, value: Line, mark?: number, stack?: { p: number; c: string }[]): Line {
+function meter(label: string, p: number, w: number, c: string, value: Line, mark?: number, trail?: string): Line {
   const narrow = w < 40
   const lw = narrow ? 5 : 8
   const vw = narrow ? 11 : VALUE_W
   const name = narrow ? (SHORT[label] ?? label).slice(0, lw - 1) : label
-  const bw = Math.max(4, w - lw - 1 - vw)
-  return [{ t: name.padEnd(lw), d: true }, ...(stack ? stackBar(stack, bw) : bar(p, bw, c, mark)), { t: ' ' }, ...padTo(value, vw)]
+  const bw = Math.max(4, w - lw - 1 - vw - (trail ? trail.length + 1 : 0))
+  return [{ t: name.padEnd(lw), d: true }, ...bar(p, bw, c, mark), { t: ' ' }, ...padTo(value, vw), ...(trail ? [{ t: ' ' + trail, c }] : [])]
 }
-
-/** A bar of parts side by side, each its share of the width in its own colour, on a subtle track. */
-export function stackBar(parts: { p: number; c: string }[], w: number): Line {
-  const out: Line = []
-  let used = 0
-  let acc = 0
-  for (const x of parts) {
-    acc += Math.max(0, x.p)
-    const end = Math.min(w, Math.round(acc * w))
-    const n = Math.max(x.p > 0 && end === used && used < w ? 1 : 0, end - used)
-    if (n > 0) { out.push({ t: '▆'.repeat(n), c: x.c }); used += n }
-  }
-  if (used < w) out.push({ t: '▆'.repeat(w - used), c: 'subtle' })
-  return merge(out)
-}
-
-/** The context categories' colours, largest first; the rest share the last. */
-export const PART_TONES = ['claude', 'suggestion', 'success', 'warning']
 
 /**
  * Claude's task list after one task-tool call: TodoWrite replaces it; TaskCreate adds an item (its id from the
@@ -349,39 +330,31 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
     ...(hi ? [[{ t: narrow ? '→ start fresh' : '→ start a fresh session  ·  /helm:prompt to start the next task', c: 'error', b: true }]] : []),
   ])
 
-  // usage: context, limits, tokens, cost
+  // usage: context (with its trail), the 5h chart, the week meter, then cost and tokens
   const body: Line[] = []
+  const tw = Math.floor(w * 0.3)
   if (d.ctx) {
     const p = d.ctx.percent ?? (d.ctx.tokens ? (100 * d.ctx.tokens) / d.ctx.window : 0)
-    const parts = (d.ctxParts ?? []).filter(x => x.tokens > 0)
-    const tone = (i: number) => PART_TONES[Math.min(i, PART_TONES.length - 1)]!
-    const stack = parts.length ? parts.map((x, i) => ({ p: x.tokens / d.ctx!.window, c: tone(i) })) : undefined
-    body.push(meter('context', p / 100, w, level(p), [{ t: `${Math.round(p)}%`, c: level(p), b: true }, ...(d.compactions ? [{ t: ' ' + '⟲'.repeat(Math.min(3, d.compactions)), c: 'suggestion' }] : [])], undefined, stack))
-    // what fills it: one legend item per category, the small ones folded into "other"
-    if (parts.length) {
-      const top = parts.slice(0, PART_TONES.length - 1)
-      const rest = parts.slice(PART_TONES.length - 1).reduce((n, x) => n + x.tokens, 0)
-      const legend = [...top.map((x, i) => ({ name: x.name.toLowerCase(), tokens: x.tokens, c: tone(i) })), ...(rest ? [{ name: parts.length === PART_TONES.length ? parts[PART_TONES.length - 1]!.name.toLowerCase() : 'other', tokens: rest, c: tone(PART_TONES.length - 1) }] : [])]
-      const pad = ' '.repeat(narrow ? 5 : 8)
-      body.push(...flow(legend.map(x => [{ t: '■ ', c: x.c }, { t: x.name + ' ', d: true }, { t: fmtTok(x.tokens) }]), w - pad.length).map(l => [{ t: pad }, ...l]))
-    }
+    const cs = d.ctxSeries ?? []
+    body.push(meter('context', p / 100, w, level(p), [{ t: `${Math.round(p)}%`, c: level(p), b: true }, ...(d.compactions ? [{ t: ' ' + '⟲'.repeat(Math.min(3, d.compactions)), c: 'suggestion' }] : [])], undefined, cs.length >= 2 ? brailleLine(cs, tw, 1)[0] : undefined))
   }
   const limit = (label: string, l: { percentUsed: number; resetsAt?: string | number }) => {
     const r = resetMs(l.resetsAt)
     body.push(meter(label, l.percentUsed / 100, w, level(l.percentUsed), [{ t: `${Math.round(l.percentUsed)}%`, c: level(l.percentUsed), b: true }, { t: r && r > now ? ` ↻${fmtDur(r - now)}` : '', d: true }]))
   }
   const five = d.limits.find(l => /five|5h/i.test(l.kind))
-  if (five) limit('5h', five)
+  const fs = d.fiveSeries ?? []
+  if (five && fs.length >= 2) {
+    const r = resetMs(five.resetsAt)
+    const c = level(five.percentUsed)
+    body.push([{ t: '5h'.padEnd(narrow ? 5 : 8), d: true }, { t: `${Math.round(five.percentUsed)}%`, c, b: true }, ...(narrow ? [] : [{ t: '  ↻' + fmtDur((r ?? now) - now), d: true }])])
+    for (const row of brailleLine(fs.map(x => x.pct), w, narrow ? 2 : 3)) body.push([{ t: row, c }])
+  } else if (five) limit('5h', five)
   const week = d.limits.find(l => /seven|week|7d/i.test(l.kind))
   if (week) limit('week', week)
-  const tk = d.tokens
-  const split = tokenSplit(tk)
-  const cacheBase = tk.input + tk.cacheRead + tk.cacheWrite
-  const parts: Line[] = []
-  if (split.total > 0) parts.push([{ t: narrow ? 'tok ' : 'tokens ', d: true }, { t: fmtTok(split.total), b: true }, { t: '  ↑', d: true }, { t: fmtTok(split.in), b: true }, { t: ' ↓', d: true }, { t: fmtTok(split.out), b: true }])
-  if (d.cost !== undefined) parts.push([{ t: `$${d.cost.toFixed(2)}`, b: true }])
-  if (cacheBase > 0) parts.push([{ t: 'cache ', d: true }, { t: `${Math.round((100 * tk.cacheRead) / cacheBase)}%`, c: tk.cacheRead / cacheBase > 0.7 ? 'success' : 'warning' }])
-  body.push(...flow(parts, w))
+  const total = tokenSplit(d.tokens).total
+  const tail = [d.cost !== undefined ? `$${d.cost.toFixed(2)}` : '', total > 0 ? `${fmtTok(total)} tok` : ''].filter(Boolean)
+  if (tail.length) body.push([{ t: tail.join(' · '), d: true }])
   if (body.length) sec('usage', '◷ USAGE', 'suggestion', body)
 
   // agents: only while the session has sub agents; running first, then the most recent finished

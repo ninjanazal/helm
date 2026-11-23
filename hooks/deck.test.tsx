@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { addCtx, addFive, agentDone, agentStep, applyStep, applyTodo, parseChecks, stackBar, bar, brailleLine, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
+import { addCtx, addFive, agentDone, agentStep, applyStep, applyTodo, parseChecks, bar, brailleLine, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
 import type { DeckData, FiveSample } from './deck-core'
 
 const data = (x: Partial<DeckData> = {}): DeckData => ({
@@ -12,7 +12,6 @@ const data = (x: Partial<DeckData> = {}): DeckData => ({
 })
 const agent = (id: string, x: object = {}) => ({ id, task: `audit part ${id}`, type: 'Explore', model: 'haiku-5-5', tokens: 12_300, steps: 4, startedAt: 3.6e6 - 65_000, ...x })
 const five = (done = 0) => Array.from({ length: 5 }, (_, i) => ({ text: `check ${i + 1}`, state: (i < done ? 'done' : 'todo') as 'done' | 'todo' }))
-const PARTS = [{ name: 'Messages', tokens: 52_000 }, { name: 'System tools', tokens: 18_000 }, { name: 'System prompt', tokens: 9_000 }, { name: 'Memory files', tokens: 3_000 }, { name: 'Skills', tokens: 2_000 }]
 const HIST = [{ n: 6, seq: 'r', tok: 2000, ms: 8000, result: 'ok' as const, text: 'done', ask: 'what can we add', cost: 0.04 }, { n: 7, seq: 'e', tok: 14000, ms: 52000, result: 'ok' as const, text: 'done', ask: 'fix the colours to match the mock I picked', cost: 0.31 }]
 const text = (secs: ReturnType<typeof deck>) => secs.map(x => [x.title, ...x.body.map(l => l.map(s => s.t).join(''))].join('\n')).join('\n')
 
@@ -38,13 +37,17 @@ test('deck: every section, fits the width, animates only while running', () => {
   const now = 3.6e6
   const on = deck(data(), 46, 7, now)
   const t = text(on)
-  for (const x of ['Add GDScript', 'FOCUS', 'USAGE', '59%', '42%', '$4.80', 'cache 82%', '⟲', '⎇ main', 'opus-5-5', 'medium', '12 turns', '1h 00m', '✎ 1 edited']) expect(t).toContain(x)
+  for (const x of ['Add GDScript', 'FOCUS', 'USAGE', '59%', '42%', '$4.80', '⟲', '⎇ main', 'opus-5-5', 'medium', '12 turns', '1h 00m', '✎ 1 edited']) expect(t).toContain(x)
+  expect(t).not.toContain('cache')
+  expect(t).not.toContain('■')
   // no live activity section, and no pace or forecast lines
   expect(on.some(x => x.id === 'now')).toBe(false)
   for (const x of ['editing hooks/deck-core.ts', 'at this pace', 'full in']) expect(t).not.toContain(x)
   for (const sec of on) for (const l of sec.body) expect(len(l)).toBeLessThanOrEqual(46)
   // the usage meters' bars line up whatever their values say
-  const ses = on.find(x => x.id === 'usage')!.body.filter(l => l[0]?.t.trim() === 'context' || l[0]?.t.trim() === '5h')
+  const wk0 = deck(data({ limits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: 3 * 3600 }, { kind: 'seven_day', percentUsed: 23, resetsAt: 5 * 3600 }] }), 46, 7, now)
+  const ses = wk0.find(x => x.id === 'usage')!.body.filter(l => l[0]?.t.trim() === 'context' || l[0]?.t.trim() === 'week')
+  expect(ses.length).toBe(2)
   expect(new Set(ses.map(l => l.map(x => x.t).join('').indexOf(' ', 9 + 20))).size).toBe(1)
   // the header has no title; a section is live only while work flows in it and a turn runs
   expect(on[0]!.id).toBe('head')
@@ -62,11 +65,10 @@ test('deck: every section, fits the width, animates only while running', () => {
   expect(fresh).not.toContain('tokens 0')
   expect(fresh).toContain('your next prompt becomes the task')
   // tokens: in = input + cache writes, out = output; cache reads only feed the cache %; no $/h rate
-  expect(t).toContain('tokens 4.0k  ↑2.0k ↓2.0k · $4.80 · cache 82%')
+  expect(t).toContain('$4.80 · 4.0k tok')
   expect(t).not.toContain('/h')
   expect(t).not.toContain('rate ')
   const big = text(deck(data({ tokens: { input: 1000, output: 2000, cacheRead: 1_400_000, cacheWrite: 1000 } }), 46, 0, now))
-  expect(big).toContain('tokens 4.0k  ↑2.0k ↓2.0k')
   expect(big).not.toContain('1.4M')
   // a weekly limit gets its own meter and reset countdown
   const wk = text(deck(data({ limits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: 3 * 3600 }, { kind: 'seven_day', percentUsed: 23, resetsAt: 5 * 3600 }] }), 46, 0, now))
@@ -81,7 +83,7 @@ test('header: topic first, then time, turns, model, effort and branch, wrapped w
 
 test('deck: fits 24, 40 and 80 columns with 0 or 3 checks and 0 or 2 agents; empty sections are absent', () => {
   for (const w of [24, 40, 80]) for (const nc of [0, 3]) for (const na of [0, 2]) {
-    const d = data({ agents: [agent('a'), agent('b', { endedAt: 3.6e6 - 5000 })].slice(0, na), checks: five(2).slice(0, nc), drift: drift(95, 1, 60), todos: five(1), ctxParts: PARTS, history: HIST })
+    const d = data({ agents: [agent('a'), agent('b', { endedAt: 3.6e6 - 5000 })].slice(0, na), checks: five(2).slice(0, nc), drift: drift(95, 1, 60), todos: five(1), history: HIST })
     const secs = deck(d, w, 3, 3.6e6)
     for (const l of layout(secs, w, 3, true)) expect(len(l)).toBeLessThanOrEqual(w)
     expect(secs.some(x => x.id === 'agents')).toBe(na > 0)
@@ -136,7 +138,7 @@ test('idle frames are static, and every colour is a theme name', () => {
   expect(draw(1)).toBe(draw(9))
   const THEME = new Set(['claude', 'success', 'error', 'warning', 'suggestion', 'subtle'])
   for (const run of [true, false]) {
-    const lines = layout(deck(data({ running: run, agents: [agent('a')], checks: [...five(2), { text: 'w', state: 'working' }], drift: drift(95, 1, 60), todos: [...five(1), { text: 'w', state: 'working' }], ctxParts: PARTS, history: HIST }), 46, 4, 3.6e6), 48, 4, run)
+    const lines = layout(deck(data({ running: run, agents: [agent('a')], checks: [...five(2), { text: 'w', state: 'working' }], drift: drift(95, 1, 60), todos: [...five(1), { text: 'w', state: 'working' }], history: HIST }), 46, 4, 3.6e6), 48, 4, run)
     for (const l of lines) for (const s of l) {
       if (s.c !== undefined) expect(THEME.has(s.c)).toBe(true)
       expect('inv' in s).toBe(false)
@@ -323,16 +325,6 @@ test('turns: the last asks newest first, with time, tokens and cost', () => {
   expect(deck(data({ history: undefined }), 50, 0, 3.6e6).some(x => x.id === 'turns')).toBe(false)
 })
 
-test('context: the meter is stacked by what fills it, with a legend; the small parts fold into one', () => {
-  expect(stackBar([{ p: 0.25, c: 'claude' }, { p: 0.25, c: 'suggestion' }], 8).map(s => `${s.c}:${s.t.length}`)).toEqual(['claude:2', 'suggestion:2', 'subtle:4'])
-  expect(stackBar([{ p: 0.001, c: 'claude' }], 8)[0]).toEqual({ t: '▆', c: 'claude' })
-  const u = deck(data({ ctxParts: PARTS }), 46, 0, 3.6e6).find(x => x.id === 'usage')!.body.map(l => l.map(s => s.t).join(''))
-  expect(u.join('|')).toContain('■ messages 52k')
-  expect(u.join('|')).toContain('■ system prompt 9.0k')
-  expect(u.join('|')).toContain('■ other 5.0k')
-  expect(u.join('|')).not.toContain('memory files')
-})
-
 test('brailleLine: exact cells for flat, rising, drop, multi-row, partial and clamped', () => {
   expect(brailleLine([50, 50, 50, 50], 2, 1)).toEqual(['⠒⠒'])
   expect(brailleLine([0, 100], 1, 1)).toEqual(['⡜'])
@@ -368,4 +360,29 @@ test('series: 5h per minute, resets with its window', () => {
   for (let i = 0; i < 130; i++) g = addFive(g.fiveSeries, g.fiveAt, i % 100, R, i * 60_000)
   expect(g.fiveSeries.length).toBe(120)
   expect(addFive([{ at: 0, pct: 3 }], R, undefined, R, 120_000).fiveSeries).toEqual([{ at: 0, pct: 3 }])
+})
+
+test('usage: context trail and 5h braille chart', () => {
+  const ser = { ctxSeries: [20, 30, 45, 59], fiveSeries: [0, 10, 20, 30, 42].map((pct, i) => ({ at: i * 60_000, pct })) }
+  const rows = (w: number, x = {}) => deck(data({ ...ser, ...x }), w, 0, 3.6e6).find(s => s.id === 'usage')!.body.map(l => l.map(s => s.t).join(''))
+  const B = /[⠁-⣿]/
+  const u = rows(46)
+  expect(u[0]).toMatch(/^context .*59%.*[⠁-⣿]/)
+  expect(u[1]).toMatch(/^5h +42% +↻/)
+  expect(u.slice(2, 5).every(r => r.length === 46)).toBe(true)
+  expect(u.slice(2, 5).some(r => B.test(r))).toBe(true)
+  expect(u.length).toBeLessThanOrEqual(8)
+  for (const r of u) expect([...r].length).toBeLessThanOrEqual(46)
+  const n = rows(32)
+  expect(n[1]).not.toContain('↻')
+  // two chart rows at narrow widths; 0-42% only reaches the lower one
+  expect(n.slice(2, 4).every(r => r.length === 32)).toBe(true)
+  expect(n.slice(2, 4).filter(r => B.test(r)).length).toBe(1)
+  for (const r of n) expect([...r].length).toBeLessThanOrEqual(32)
+  // fewer than 2 samples: plain meters, no braille
+  const few = rows(46, { ctxSeries: [59], fiveSeries: [{ at: 0, pct: 42 }] })
+  expect(few.some(r => B.test(r))).toBe(false)
+  expect(few.some(r => /^5h .*42%/.test(r))).toBe(true)
+  // no 5h limit (API key): no 5h block
+  expect(rows(46, { limits: [] }).some(r => r.startsWith('5h'))).toBe(false)
 })

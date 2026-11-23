@@ -40,18 +40,8 @@ function addFeed(s: DeckState, f: Omit<FeedItem, 'at'>, at: number): DeckState {
 
 const TEST_RE = /\b(make (test|check)|npm (run )?test|pnpm test|yarn test|bun test|cargo test|pytest|go test|claude plugin test)\b/
 
-let polls = 0
 async function poll($: EngineInterface) {
   const cwd = await $.session.cwd().catch(() => undefined)
-  // what fills the context: the /context summary (local estimates), every 30s rather than every poll
-  if (polls++ % 6 === 0) {
-    await quiet(async () => {
-      const b = (await $.session.usage({ breakdown: 'summary' })).context.breakdown
-      if (!b) return
-      const parts = b.categories.filter(c => c.kind === 'used' && c.tokens > 0).map(c => ({ name: c.name, tokens: c.tokens })).sort((x, y) => y.tokens - x.tokens)
-      await set($, s => ({ ...s, ctxParts: parts }))
-    })
-  }
   const opts = cwd ? { cwd, timeoutMs: 3000 } : { timeoutMs: 3000 }
   await quiet(async () => {
     const u = await $.session.usage()
