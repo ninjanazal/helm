@@ -6,6 +6,7 @@ import type { DeckDone, DeckState } from '../types'
 import { readLevel } from './lean'
 import { readMode } from './workload'
 import { readLevel as readTesting } from './testing'
+import { readAdvisor } from './advisor'
 
 /**
  * The deck pane: the session's health beside the chat. Every figure comes from the engine (session.measure,
@@ -61,6 +62,10 @@ async function poll($: EngineInterface) {
   await quiet(async () => {
     const testing = await readTesting($)
     await set($, s => (s.testing === testing ? s : { ...s, testing }))
+  })
+  await quiet(async () => {
+    const advisor = await readAdvisor($)
+    await set($, s => (s.advisor === advisor ? s : { ...s, advisor }))
   })
   await quiet(async () => {
     const r = await $.process.run(['git', 'status', '--porcelain', '-b'], opts)

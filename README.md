@@ -9,6 +9,7 @@ helm is a Claude Code plugin:
 - **Lean mode:** on by default, a short system-prompt section that cuts output tokens. `/helm:lean off` turns it off. Ideas from ponytail and caveman, written natively.
 - **Testing:** `/helm:testing` sets how much testing the host writes and runs: `off` (none unless asked), `light` (default, only for risky logic) or `thorough` (test-first, edge cases, a regression test per bug, the full suite). Like lean, it applies from the next session, `/clear` or compaction, and a project can pin it in `.claude/helm/testing`.
 - **Workload:** `/helm:workload` sets how much work the host hands to cheaper sub agents: `off`, `sometimes` (default, only mechanical or independent units) or `always` (the host plans and reviews, sub agents implement). It applies the same way and pins in `.claude/helm/workload`.
+- **Advisor:** `/helm:advisor` sets how often the model consults the built-in advisor, with planning as the main trigger: `low` (also on the drafted plan), `mid` (default, plus plan changes and before done) or `high` (plus before planning starts and on every revision). Guidance only. It applies the same way and pins in `.claude/helm/advisor`.
 - **superpowers** (workflow skills) is installed with helm as a plugin dependency; helm's prompt and commit skills route to it and work without it.
 
 ## 📦 Install
@@ -50,6 +51,7 @@ rm -rf .claude/helm/tasks .claude/helm/team.json
 | `/helm:lean [on \| off \| lite \| full]` | Lean mode, on by default: fewer output tokens (answer first, no recap, smallest complete change) without dropping checks. Pin per project with `.claude/helm/lean` |
 | `/helm:testing [off \| light \| thorough]` | How much testing the host writes and runs: `off` none unless asked, `light` (default) only for risky logic, `thorough` test-first with edge cases, regression tests and the full suite. Pin per project with `.claude/helm/testing` |
 | `/helm:workload [off \| sometimes \| always]` | Hand work to cheaper sub agents (haiku or sonnet): `sometimes` (default) for mechanical or independent units, `always` for all implementation, `off` for none. Pin per project with `.claude/helm/workload` |
+| `/helm:advisor [low \| mid \| high]` | How often the model consults the built-in advisor while planning: `low`, `mid` (default), `high`. Pin per project with `.claude/helm/advisor` |
 | `/helm:commit [--dry]` | Commit the staged changes: Conventional Commits subject, bulleted body, no attribution lines |
 | `/helm:help` | The full guide |
 

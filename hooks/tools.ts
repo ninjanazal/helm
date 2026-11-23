@@ -2,6 +2,7 @@ import type { EngineInterface } from 'claude-code'
 import { engineIo, setTask } from './task'
 import { leanSet } from './lean'
 import { workloadSet } from './workload'
+import { advisorSet } from './advisor'
 import { testingSet } from './testing'
 import { deckOpenNow, deckReset, deckSet, deckTask } from './deck'
 
@@ -59,6 +60,16 @@ export async function registerHelmTools($: EngineInterface): Promise<void> {
     isDeferred: false,
   })
   await $.tool.register({
+    name: 'advisor',
+    description: 'Sets how often helm asks you to consult the built-in advisor tool while planning. It only sets a level and does not reach the reviewer. action: low, mid, high, or status.',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: { action: { type: 'string', enum: ['low', 'mid', 'high', 'status'] } },
+    },
+    isDeferred: false,
+  })
+  await $.tool.register({
     name: 'testing',
     description: 'Testing: how much testing helm writes and runs. action: off, light, thorough, or status.',
     inputSchema: {
@@ -104,6 +115,7 @@ export async function handleHelmTool($: EngineInterface, tool: string, args: Rec
     return toolText(await leanSet($, a === 'on' ? 'full' : a))
   }
   if (tool === 'mcp__helm__workload') return toolText(await workloadSet($, str(args.action)))
+  if (tool === 'mcp__helm__advisor') return toolText(await advisorSet($, str(args.action)))
   if (tool === 'mcp__helm__testing') return toolText(await testingSet($, str(args.action)))
   if (tool === 'mcp__helm__set_task') {
     const prompt = str(args.prompt)?.trim()

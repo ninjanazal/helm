@@ -2,6 +2,7 @@ import { helmIsOn, deckCleared, deckMeasure, deckOpen, deckPrompt, deckStart, de
 import type { Register } from 'claude-code'
 import { leanText, readLevel, LEAN_ID } from './lean'
 import { WORKLOAD_ID, workloadSection } from './workload'
+import { ADVISOR_ID, advisorSection } from './advisor'
 import { TESTING_ID, testingSection } from './testing'
 import { handleHelmTool, registerHelmTools, toolArgs } from './tools'
 
@@ -40,10 +41,12 @@ export const register: Register = (on, options) => {
     const lean = leanText(await readLevel($))
     const workload = await workloadSection($)
     const testing = await testingSection($)
-    const sections = r.sections.filter(s => s.id !== LEAN_ID && s.id !== WORKLOAD_ID && s.id !== TESTING_ID)
+    const advisor = await advisorSection($)
+    const sections = r.sections.filter(s => s.id !== LEAN_ID && s.id !== WORKLOAD_ID && s.id !== TESTING_ID && s.id !== ADVISOR_ID)
     if (lean) sections.push({ id: LEAN_ID, text: lean, scope: 'session' as const })
     if (workload) sections.push({ id: WORKLOAD_ID, text: workload, scope: 'session' as const })
     sections.push({ id: TESTING_ID, text: testing, scope: 'session' as const })
+    sections.push({ id: ADVISOR_ID, text: advisor, scope: 'session' as const })
     return { sections }
   }).catch(($, e, next) => next(e))
 

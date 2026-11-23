@@ -341,7 +341,9 @@ test('task: lean and workload share a line, wrapping when narrow', () => {
 
 test('task: testing joins the settings row, wraps when narrow, absent when unset', () => {
   const text = (w: number, d = data({ lean: 'full', workload: 'always', testing: 'thorough' })) => deck(d, w, 0, 3.6e6)[0]!.body.map(l => l.map(s => s.t).join('').trim())
-  expect(text(80)).toContain('lean ▰▰ full  workload ▰▰ always  testing ▰▰ thorough')
+  // centred 2x2 grid: lean | workload on one row, testing alone on the next
+  expect(text(80)).toContain('lean ▰▰ full         workload ▰▰ always')
+  expect(text(80)).toContain('testing ▰▰ thorough')
   const narrow = text(30)
   expect(narrow.some(l => l.startsWith('testing'))).toBe(true)
   expect(narrow.some(l => l.startsWith('lean') && l.includes('testing'))).toBe(false)

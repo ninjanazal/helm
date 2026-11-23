@@ -27,6 +27,8 @@ export type DeckData = {
   workload?: 'off' | 'sometimes' | 'always'
   /** helm's testing level, as stored. */
   testing?: 'off' | 'light' | 'thorough'
+  /** helm's advisor level, as stored. */
+  advisor?: 'low' | 'mid' | 'high'
   branch?: string
   /** Working tree vs HEAD: changed files (tracked and untracked) and the tracked lines added and removed. */
   changes?: { files: number; added: number; removed: number }
@@ -383,12 +385,12 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   const narrow = w < 40
   const spinner = d.running ? SPIN[frame % SPIN.length]! : undefined
 
-  // task: the goal (the live state is shown at the bottom), then model and effort on a line, lean and workload together on the next, then the session's facts, a blank row before the facts
+  // task: the goal (the live state is shown at the bottom), then model and effort on a line, the mode chips in a centred 2x2 grid below it, then the session's facts, a blank row before the facts
   const mv = d.running
   const goal: Line = [d.task ? (d.running ? { t: '◎ ', c: 'claude', b: true } : { t: '✔ ', c: 'success' }) : { t: '· ', d: true },
     d.task ? { t: marquee(d.task, w - 2, frame, mv), b: true } : { t: 'your next prompt becomes the task', d: true }]
   const ph = d.phase ?? { kind: 'idle' as const }
-  // one line each: model and effort, lean, workload; a chip row marks the stored choice
+  // model and effort on a line; lean, workload, testing and advisor in a grid; a chip marks the stored choice
   const modelRow: Line = []
   if (d.model) modelRow.push({ t: ` ${d.model} `, bg: 'claude', b: true })
   if (d.effort) {
@@ -407,7 +409,17 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   if (d.lean) modes.push(choice('lean', ['off', 'lite', 'full'], d.lean))
   if (d.workload) modes.push(choice('workload', ['off', 'sometimes', 'always'], d.workload))
   if (d.testing) modes.push(choice('testing', ['off', 'light', 'thorough'], d.testing))
-  settings.push(...flow(modes, w, '  '))  // lean and workload share a line; they wrap only when it is too narrow
+  if (d.advisor) modes.push(choice('advisor', ['low', 'mid', 'high'], d.advisor))
+  // centred 2x2 grid, filled row by row: lean | workload, testing | advisor; one column when the block is wider than w
+  const colW = (c: number, n: number) => Math.max(0, ...modes.filter((_, i) => i % n === c).map(len))
+  const cols = modes.length > 1 && colW(0, 2) + 2 + colW(1, 2) <= w ? 2 : 1
+  const col1 = colW(0, cols)
+  const col2 = cols === 2 ? colW(1, 2) : 0
+  const gridPad = ' '.repeat(Math.max(0, (w - (col1 + (col2 ? 2 + col2 : 0))) >> 1))
+  for (let i = 0; i < modes.length; i += cols) {
+    const row = modes.slice(i, i + cols)
+    settings.push([{ t: gridPad }, ...(row.length > 1 ? [...padTo(row[0]!, col1), { t: '  ' }, ...row[1]!] : row[0]!)])
+  }
   const items: Line[] = []
   if (d.taskAt !== undefined) items.push([{ t: fmtDur(now - d.taskAt) }])
   items.push([{ t: String(d.turns), b: true }, { t: d.turns === 1 ? ' turn' : ' turns', d: true }])

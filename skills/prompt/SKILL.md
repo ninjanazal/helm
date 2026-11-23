@@ -104,6 +104,11 @@ On split, add this block after `<acceptance>`, one entry per unit, and keep the 
 Pick Haiku for mechanical edits (rename, move, boilerplate, tests from a spec) and Sonnet for units that need
 reading and judging code. If the person declines, write nothing and don't ask again.
 
+## 4c. Ask the advisor about the draft
+Read the advisor level: the file `.claude/helm/advisor` if it exists, else call `mcp__helm__advisor` with
+`{ "action": "status" }`. `low`: skip this step. `mid` or `high`: if you have the built-in `advisor` tool (no
+parameters; not `mcp__helm__advisor`, which only sets the level), call it once on the draft before showing it, and fold its answer into the prompt.
+
 ## 5. Get it approved
 Show the prompt in one fenced block, then one line: "Approve it, edit it, or change the scope?"
 - If they edit: apply the edits, re-check step 4, and show it again.
