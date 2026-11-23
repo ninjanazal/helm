@@ -4,7 +4,7 @@
 
 helm is a Claude Code plugin:
 
-- **Deck pane:** the session's health beside the chat. A header with the task, time, turns, model, effort, lean level and branch; a focus meter (drift: time for a fresh session?); usage: a context meter with a braille trail of recent turns, a braille chart of the 5h limit with its reset countdown, a weekly meter, and cost and tokens; a row per sub agent with its own tokens and clock; and the approved `/helm:prompt`'s acceptance checks, which Claude ticks as it verifies them. Colours follow your theme, light or dark. It animates only while a turn runs.
+- **Deck pane:** the session's health beside the chat. A header with the task, time, turns, model, effort, lean level and branch; a focus meter (drift: time for a fresh session?); usage: a context meter with a braille trail of recent turns, a braille chart of the 5h limit with its reset countdown, a weekly meter, and cost and tokens; and a row per sub agent with its own tokens and clock. Colours follow your theme, light or dark. It animates only while a turn runs.
 - **`/helm:prompt`:** turns a rough request into a complete, checkable prompt (goal, grounded context, scope, acceptance checks, stop conditions) and saves it as the current task once approved.
 - **Lean mode:** on by default, a short system-prompt section that cuts output tokens. `/helm:lean off` turns it off. Ideas from ponytail and caveman, written natively.
 - **superpowers** (workflow skills) is installed with helm as a plugin dependency; helm's prompt and commit skills route to it and work without it.

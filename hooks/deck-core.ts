@@ -1,6 +1,6 @@
 /**
  * Deck: pure parts (no `$`), so they are unit-tested. The deck is a list of sections (header, focus, usage,
- * agents, checks) drawn open: a coloured title and a rule, no boxes. Colours are theme names only. While a turn
+ * agents, todo) drawn open: a coloured title and a rule, no boxes. Colours are theme names only. While a turn
  * runs the spinner turns and a light sweeps the rule of the sections where work flows; idle, nothing moves.
  */
 
@@ -32,7 +32,6 @@ export type DeckData = {
   cur?: { seq: string; at: number; tok0: number; doing?: string; target?: string }
   history?: { n: number; seq: string; tok: number; ms: number; result: 'ok' | 'warn' | 'err' | 'none'; text: string; ask?: string; cost?: number }[]
   agents?: DeckAgent[]
-  checks?: DeckCheck[]
   todos?: DeckTodo[]
   ctxSeries?: number[]
   fiveSeries?: FiveSample[]
@@ -307,8 +306,8 @@ const CHECK: Record<DeckCheck['state'], (spin: string | undefined) => Seg> = {
 }
 
 /**
- * The deck as sections: header (no title), focus, usage, agents (only with sub agents), checks (only with an
- * approved prompt). Colours are theme names only, so light and dark themes both read; nothing moves unless a
+ * The deck as sections: header (no title), focus, usage, agents (only with sub agents), todo (only with a
+ * task list). Colours are theme names only, so light and dark themes both read; nothing moves unless a
  * turn runs. `w` is the text width inside the pane.
  */
 export function deck(d: DeckData, w: number, frame: number, now: number): Section[] {
@@ -394,28 +393,6 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   }
 
 
-  // checks: the approved prompt's acceptance items, ticked by Claude as it verifies them
-  const ck = d.checks ?? []
-  if (ck.length) {
-    const done = ck.filter(c => c.state === 'done').length
-    const all = done === ck.length
-    const row = (c: DeckCheck): Line => [CHECK[c.state](spinner), { t: ' ' }, c.state === 'todo' ? { t: c.text, d: true } : { t: c.text, b: c.state === 'working' }, ...(c.state === 'working' ? [{ t: '  ← working on', d: true }] : [])]
-    sec('checks', '☑ CHECKS', all ? 'success' : 'suggestion', ck.map(row), ck.some(c => c.state === 'working'), `${done} of ${ck.length}`)
-  }
-  return out
-}
-
-/** The acceptance items of an approved prompt: `- [ ] text` (todo) or `- [x] text` (done) lines inside `<acceptance>`. */
-export function parseChecks(prompt: string): DeckCheck[] {
-  const m = /<acceptance>([\s\S]*?)<\/acceptance>/.exec(prompt)
-  if (!m) return []
-  const out: DeckCheck[] = []
-  for (const line of m[1]!.split('\n')) {
-    const x = /^\s*-\s*\[( |x|X)\]\s+(.+?)\s*$/.exec(line)
-    if (!x) continue
-    const text = /^`[^`]*`$/.test(x[2]!) ? x[2]!.slice(1, -1) : x[2]!
-    out.push({ text, state: x[1] === ' ' ? 'todo' : 'done' })
-  }
   return out
 }
 

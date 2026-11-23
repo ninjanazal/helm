@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import { DRIFT_AT, PANE_FRAME_MS, addCtx, addFive, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, layout, terms, tokenSplit, topicShift, verdict } from './deck-core'
 import type { DeckData, FeedItem, StepUsage } from './deck-core'
-import type { DeckCheck, DeckDone, DeckState } from '../types'
+import type { DeckDone, DeckState } from '../types'
 import { readLevel } from './lean'
 
 /**
@@ -321,24 +321,8 @@ export async function deckOpenNow($: EngineInterface): Promise<string> {
 /** Re-anchors the task: drift and turn counts start again from it. */
 export async function deckTask($: EngineInterface, text: string): Promise<string> {
   const now = await $.clock.now()
-  await set($, s => ({ ...s, task: text.slice(0, 80), taskAt: now, taskTerms: [...terms(text)], recent: [], turns: 0, checks: undefined }))
+  await set($, s => ({ ...s, task: text.slice(0, 80), taskAt: now, taskTerms: [...terms(text)], recent: [], turns: 0 }))
   return `Deck task set: ${text}`
-}
-
-/** Loads the approved prompt's acceptance items as the deck's checks (set_task calls it after deckTask). */
-export async function deckChecks($: EngineInterface, checks: DeckCheck[]): Promise<void> {
-  await set($, s => ({ ...s, checks: checks.length ? checks : undefined }))
-}
-
-/** Marks check `n` (1-based) todo, working or done. Answers what changed, or an error for a bad n or state. */
-export async function deckCheck($: EngineInterface, n: unknown, state: unknown): Promise<{ text: string; isError?: true }> {
-  const list = (await read($, state_)).checks ?? []
-  if (!list.length) return { text: 'Error: no checks: approve a /helm:prompt first.', isError: true }
-  if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > list.length) return { text: `Error: n is a check number from 1 to ${list.length}.`, isError: true }
-  if (state !== 'todo' && state !== 'working' && state !== 'done') return { text: 'Error: state is todo, working or done.', isError: true }
-  const next = list.map((c, i) => (i === n - 1 ? { ...c, state } : state === 'working' && c.state === 'working' ? { ...c, state: 'todo' as const } : c))
-  await set($, s => ({ ...s, checks: next }))
-  return { text: `Check ${n} ${state} (${next.filter(c => c.state === 'done').length}/${next.length}).` }
 }
 
 export async function deckReset($: EngineInterface): Promise<string> {

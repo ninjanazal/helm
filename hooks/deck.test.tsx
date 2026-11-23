@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { fmtDur, addCtx, addFive, agentDone, agentStep, applyStep, applyTodo, parseChecks, bar, brailleLine, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
+import { fmtDur, addCtx, addFive, agentDone, agentStep, applyStep, applyTodo, bar, brailleLine, isDeckOn, deck, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
 import type { DeckData, FiveSample } from './deck-core'
 
 const data = (x: Partial<DeckData> = {}): DeckData => ({
@@ -53,9 +53,9 @@ test('deck: every section, fits the width, animates only while running', () => {
   expect(on[0]!.id).toBe('head')
   expect(on[0]!.title).toBe('')
   expect(on.filter(x => x.live).map(x => x.id)).toEqual([])
-  const work = deck(data({ agents: [agent('a')], checks: [{ text: 'x', state: 'working' }] }), 46, 7, now)
-  expect(work.filter(x => x.live).map(x => x.id)).toEqual(['agents', 'checks'])
-  const idle = deck(data({ running: false, agents: [agent('a')], checks: [{ text: 'x', state: 'working' }] }), 46, 7, now)
+  const work = deck(data({ agents: [agent('a')], todos: [{ text: 'x', state: 'working' }] }), 46, 7, now)
+  expect(work.filter(x => x.live).map(x => x.id)).toEqual(['agents', 'todo'])
+  const idle = deck(data({ running: false, agents: [agent('a')], todos: [{ text: 'x', state: 'working' }] }), 46, 7, now)
   expect(idle.some(x => x.live)).toBe(false)
   expect(text(idle)).toContain('✔')
   expect(text(deck(data({ drift: drift(95, 1, 60) }), 46, 0, now))).toContain('start a fresh session')
@@ -82,13 +82,13 @@ test('header: topic first, then time, turns, model, effort and branch, wrapped w
   expect(rest.join('|')).toBe('1h 00m · 12 turns · opus-5-5|medium · ⎇ main ±3|✎ 1 edited 2 read')
 })
 
-test('deck: fits 24, 40 and 80 columns with 0 or 3 checks and 0 or 2 agents; empty sections are absent', () => {
-  for (const w of [24, 40, 80]) for (const nc of [0, 3]) for (const na of [0, 2]) {
-    const d = data({ agents: [agent('a'), agent('b', { endedAt: 3.6e6 - 5000 })].slice(0, na), checks: five(2).slice(0, nc), drift: drift(95, 1, 60), todos: five(1), history: HIST, ctxSeries: [20, 30, 45, 59], fiveSeries: [0, 10, 20, 30, 42].map((pct, i) => ({ at: i * 60_000, pct })) })
+test('deck: fits 24, 40 and 80 columns with 0 or 2 agents; empty sections are absent; no checks section', () => {
+  for (const w of [24, 40, 80]) for (const na of [0, 2]) {
+    const d = data({ agents: [agent('a'), agent('b', { endedAt: 3.6e6 - 5000 })].slice(0, na), drift: drift(95, 1, 60), todos: five(1), history: HIST, ctxSeries: [20, 30, 45, 59], fiveSeries: [0, 10, 20, 30, 42].map((pct, i) => ({ at: i * 60_000, pct })) })
     const secs = deck(d, w, 3, 3.6e6)
     for (const l of layout(secs, w, 3, true)) expect(len(l)).toBeLessThanOrEqual(w)
     expect(secs.some(x => x.id === 'agents')).toBe(na > 0)
-    expect(secs.some(x => x.id === 'checks')).toBe(nc > 0)
+    expect(secs.some(x => x.id === 'checks')).toBe(false)
     expect(secs.some(x => x.id === 'now')).toBe(false)
   }
 })
@@ -105,41 +105,13 @@ test('agents: one compact row each, running first; the title counts running agen
   expect(ag.body[1]![2]!.d).toBe(true)
 })
 
-test('checks: the approved prompt\'s items last, ticked by state; hidden without a prompt', () => {
-  const ck = [...five(3)]
-  ck[3] = { text: 'idle frames static', state: 'working' as never }
-  const secs = deck(data({ checks: ck }), 46, 0, 3.6e6)
-  expect(secs[secs.length - 1]!.id).toBe('checks')
-  const c = secs.find(x => x.id === 'checks')!
-  expect(c.title).toBe('☑ CHECKS')
-  expect(c.meta).toBe('3 of 5')
-  expect(c.body.map(l => l.map(s => s.t).join(''))).toEqual(['✔ check 1', '✔ check 2', '✔ check 3', '⠋ idle frames static  ← working on', '○ check 5'])
-  expect(c.body[4]![0]!.c).toBe('subtle')
-  expect(deck(data({ checks: five(5) }), 46, 0, 3.6e6).find(x => x.id === 'checks')!.tone).toBe('success')
-  // idle: the working check shows a still mark
-  expect(deck(data({ checks: ck, running: false }), 46, 0, 3.6e6).find(x => x.id === 'checks')!.body[3]![0]!.t).toBe('○')
-  expect(deck(data(), 46, 0, 3.6e6).some(x => x.id === 'checks')).toBe(false)
-})
-
-test('parseChecks: the acceptance block\'s items, nothing outside it', () => {
-  const p = ['<goal>x</goal>', '- [ ] not this one', '<acceptance>', '  - [ ] `make check exits 0`', '  - [ ] widths fit', '  - [x] already done', '  - [ ] a `code` bit inside', '  - [ ] fifth', '  not an item', '</acceptance>', '- [ ] nor this'].join('\n')
-  expect(parseChecks(p)).toEqual([
-    { text: 'make check exits 0', state: 'todo' },
-    { text: 'widths fit', state: 'todo' },
-    { text: 'already done', state: 'done' },
-    { text: 'a `code` bit inside', state: 'todo' },
-    { text: 'fifth', state: 'todo' },
-  ])
-  expect(parseChecks('no block')).toEqual([])
-})
-
 test('idle frames are static, and every colour is a theme name', () => {
-  const d = data({ running: false, agents: [agent('a')], checks: five(2) })
+  const d = data({ running: false, agents: [agent('a')], todos: five(2) })
   const draw = (f: number) => JSON.stringify(layout(deck(d, 46, f, 3.6e6), 48, f, false))
   expect(draw(1)).toBe(draw(9))
   const THEME = new Set(['claude', 'success', 'error', 'warning', 'suggestion', 'subtle'])
   for (const run of [true, false]) {
-    const lines = layout(deck(data({ running: run, agents: [agent('a')], checks: [...five(2), { text: 'w', state: 'working' }], drift: drift(95, 1, 60), todos: [...five(1), { text: 'w', state: 'working' }], history: HIST }), 46, 4, 3.6e6), 48, 4, run)
+    const lines = layout(deck(data({ running: run, agents: [agent('a')], drift: drift(95, 1, 60), todos: [...five(1), { text: 'w', state: 'working' }], history: HIST }), 46, 4, 3.6e6), 48, 4, run)
     for (const l of lines) for (const s of l) {
       if (s.c !== undefined) expect(THEME.has(s.c)).toBe(true)
       expect('inv' in s).toBe(false)
@@ -281,22 +253,6 @@ test('deck tool: off closes and stays off across /clear and a new session; on re
   expect(said(await deckTool($, { action: 'task', text: 'ship it' }))).toBe('Deck task set: ship it')
   expect(said(await deckTool($, { action: 'reset' }))).toBe('Deck reset.')
   expect(said(await deckTool($, { action: 'open' }))).toBe('Deck opened.')
-})
-
-test('deck tool check: marks an item of the approved prompt, answers the count, refuses a bad n', async ($, on) => {
-  const stored: Record<string, unknown> = {}
-  stubDeck(on, stored)
-  on('fs.write', () => ({ value: undefined }) as never)
-  await $.session.start({ cwd: '/proj', surface: 'terminal', isInteractive: true })
-  const prompt = '<goal>g</goal>\n<acceptance>\n- [ ] a\n- [ ] b\n- [ ] c\n- [ ] d\n- [ ] e\n</acceptance>'
-  await $.tool.call({ tool: 'mcp__helm__set_task', prompt, goal: 'g' } as never)
-  expect(said(await deckTool($, { action: 'check', n: 2, state: 'done' }))).toBe('Check 2 done (1/5).')
-  expect(said(await deckTool($, { action: 'check', n: 3, state: 'working' }))).toBe('Check 3 working (1/5).')
-  expect(said(await deckTool($, { action: 'check', n: 9, state: 'done' }))).toBe('Error: n is a check number from 1 to 5.')
-  expect(said(await deckTool($, { action: 'check', n: 1, state: 'nope' }))).toBe('Error: state is todo, working or done.')
-  // a task re-anchored without a prompt drops the checks
-  await deckTool($, { action: 'task', text: 'other' })
-  expect(said(await deckTool($, { action: 'check', n: 1, state: 'done' }))).toBe('Error: no checks: approve a /helm:prompt first.')
 })
 
 test('todo: TodoWrite replaces the list; TaskCreate adds, TaskUpdate changes or deletes by id', () => {
