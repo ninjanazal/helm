@@ -91,7 +91,7 @@ export function addFive(series: FiveSample[] | undefined, windowAt: number | und
   const base = fresh ? [] : (series ?? [])
   if (pct === undefined || !Number.isFinite(pct)) return { fiveSeries: base, fiveAt }
   const last = base.at(-1)
-  const next = last && at - last.at < 60_000 ? [...base.slice(0, -1), { at, pct }] : [...base, { at, pct }]
+  const next = last && at - last.at < 60_000 ? [...base.slice(0, -1), { at: last.at, pct }] : [...base, { at, pct }]
   return { fiveSeries: next.slice(-SERIES_CAP), fiveAt }
 }
 

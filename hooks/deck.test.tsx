@@ -356,11 +356,14 @@ test('series: 5h per minute, resets with its window', () => {
   const R = 1.8e12 // epoch ms (resetMs reads numbers under 1e12 as seconds)
   let f = addFive(undefined, undefined, 10, R, 0)
   f = addFive(f.fiveSeries, f.fiveAt, 11, R + 2000, 30_000) // jitter, same minute: replaced
-  expect(f.fiveSeries).toEqual([{ at: 30_000, pct: 11 }])
+  expect(f.fiveSeries).toEqual([{ at: 0, pct: 11 }])
   f = addFive(f.fiveSeries, f.fiveAt, 12, R, 90_000) // a new minute: appended
   expect(f.fiveSeries.map(x => x.pct)).toEqual([11, 12])
   f = addFive(f.fiveSeries, f.fiveAt, 1, R + 5 * 3.6e6, 200_000) // a new window: reset
   expect(f.fiveSeries).toEqual([{ at: 200_000, pct: 1 }])
+  let h = addFive(undefined, undefined, 1, R, 0)
+  for (const t of [30_000, 50_000, 70_000]) h = addFive(h.fiveSeries, h.fiveAt, 2, R, t)
+  expect(h.fiveSeries.length).toBe(2)
   let g = { fiveSeries: [] as FiveSample[], fiveAt: R as number | undefined }
   for (let i = 0; i < 130; i++) g = addFive(g.fiveSeries, g.fiveAt, i % 100, R, i * 60_000)
   expect(g.fiveSeries.length).toBe(120)

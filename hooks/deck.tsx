@@ -199,10 +199,10 @@ export async function deckTurnDone($: EngineInterface, e: { agentId?: string }) 
   const cost = await $.session.usage().then(u => u.cost?.usd).catch(() => undefined)
   await quiet(() => set($, s => {
     const n = s.turns + 1
-    if (!s.cur) return { ...s, turns: n, cost: cost ?? s.cost, ctxSeries: addCtx(s.ctxSeries, ctxPct(s)) }
+    if (!s.cur) return { ...s, turns: n, cost: cost ?? s.cost, ctxSeries: addCtx(s.ctxSeries, s.ctx ? ctxPct(s) : undefined) }
     const spent = cost !== undefined && s.cur.cost0 !== undefined ? Math.max(0, cost - s.cur.cost0) : undefined
     const done: DeckDone = { n, seq: s.cur.seq, tok: totalTok(s) - s.cur.tok0, ms: now - s.cur.at, ...verdict(s.cur), ask: s.cur.ask, cost: spent }
-    return { ...s, turns: n, cost: cost ?? s.cost, curDone: true, history: [...(s.history ?? []), done].slice(-8), ctxSeries: addCtx(s.ctxSeries, ctxPct(s)) }
+    return { ...s, turns: n, cost: cost ?? s.cost, curDone: true, history: [...(s.history ?? []), done].slice(-8), ctxSeries: addCtx(s.ctxSeries, s.ctx ? ctxPct(s) : undefined) }
   }))
   await quiet(() => update($, frame, f => f + 1))
 }
