@@ -31,6 +31,8 @@ export type DeckData = {
   advisor?: 'low' | 'mid' | 'high'
   /** The model the built-in advisor runs on (Claude Code's `advisorModel` setting). */
   advisorModel?: string
+  /** Cumulative sub-agent tokens; with the main tokens it gives the delegated share. */
+  delegated?: number
   branch?: string
   /** Working tree vs HEAD: changed files (tracked and untracked) and the tracked lines added and removed. */
   changes?: { files: number; added: number; removed: number }
@@ -99,7 +101,7 @@ export function addCtx(series: number[] | undefined, pct: number | undefined): n
 export type FiveSample = { at: number; pct: number }
 
 /** The 5h usage, one sample a minute: a sample within a minute of the last updates its pct and keeps its minute; a reset time that moves forward by over 30 min (a new 5h window) starts the series over; jitter, a backward move or an absent one keeps it. */
-/** The 5h chart needs about half an hour of samples (one a minute) that move by at least FIVE_CHART_SPREAD points; until then the plain meter shows, never a chart of blank rows. */
+/** The 5h chart needs about half an hour of samples (one a minute) that move by at least FIVE_CHART_SPREAD points; the meter always shows and the chart sits under it, scaled to its own range. */
 export const FIVE_CHART_MIN = 30
 export const FIVE_CHART_SPREAD = 8
 const NEW_WINDOW_MS = 30 * 60_000
@@ -204,8 +206,8 @@ export function bar(p: number, w: number, c: string, mark?: number): Line {
 
 const BRAILLE = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]]
 
-/** A braille line chart, `h` rows of `w` cells, top row first: the newest of `values` at the right edge, scaled 0..max. */
-export function brailleLine(values: number[], w: number, h: number, max = 100): string[] {
+/** A braille line chart, `h` rows of `w` cells, top row first: the newest of `values` at the right edge, scaled min..max (0..100 by default). */
+export function brailleLine(values: number[], w: number, h: number, max = 100, min = 0): string[] {
   const pw = w * 2, ph = h * 4
   const bits = new Array<number>(w * h).fill(0)
   const set = (x: number, y: number) => {
@@ -214,7 +216,7 @@ export function brailleLine(values: number[], w: number, h: number, max = 100): 
     if (x < 0 || y < 0 || x >= pw || y >= ph) return
     bits[(y >> 2) * w + (x >> 1)] |= BRAILLE[x & 1][y & 3]
   }
-  const yOf = (p: number) => ph - 1 - Math.round((Math.min(max, Math.max(0, p)) / max) * (ph - 1))
+  const yOf = (p: number) => ph - 1 - Math.round(((Math.min(max, Math.max(min, p)) - min) / (max - min || 1)) * (ph - 1))
   const v = values.slice(-pw)
   const x0 = pw - v.length
   v.forEach((p, i) => {
@@ -414,7 +416,12 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   if (modelRow.length) settings.push([{ t: ' '.repeat(Math.max(0, (w - len(modelRow)) >> 1)) }, ...modelRow], [])
   const modes: Line[] = []
   if (d.lean) modes.push(choice('lean', ['off', 'lite', 'full'], d.lean))
-  if (d.workload) modes.push(choice('workload', ['off', 'sometimes', 'always'], d.workload))
+  if (d.workload) {
+    const chip = choice('workload', ['off', 'sometimes', 'always'], d.workload)
+    const dl = d.delegated ?? 0, main = d.tokens.input + d.tokens.cacheWrite + d.tokens.output
+    if (dl > 0 && dl + main > 0) chip.push({ t: ` ${Math.round((100 * dl) / (main + dl))}%${narrow ? '' : ' delegated'}`, d: true, b: true })
+    modes.push(chip)
+  }
   if (d.testing) modes.push(choice('testing', ['off', 'light', 'thorough'], d.testing))
   if (d.advisor) {
     const chip = choice('advisor', ['low', 'mid', 'high'], d.advisor)
@@ -456,7 +463,7 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
     ...(hi ? [[{ t: narrow ? '→ start fresh' : '→ start a fresh session  ·  /helm:prompt to start the next task', c: 'error', b: true }]] : []),
   ])
 
-  // usage: context, the 5h chart, the week meter, then cost and tokens
+  // usage: context, the 5h meter and its chart, the week meter, then cost and tokens
   const body: Line[] = []
   if (d.ctx) {
     const p = d.ctx.percent ?? (d.ctx.tokens ? (100 * d.ctx.tokens) / d.ctx.window : 0)
@@ -469,12 +476,11 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   }
   const five = d.limits.find(l => /five|5h/i.test(l.kind))
   const fs = d.fiveSeries ?? []
-  if (five && fs.length >= FIVE_CHART_MIN && Math.max(...fs.map(x => x.pct)) - Math.min(...fs.map(x => x.pct)) >= FIVE_CHART_SPREAD) {
-    const r = resetMs(five.resetsAt)
-    const c = level(five.percentUsed)
-    body.push([{ t: '5h'.padEnd(narrow ? 5 : 8), d: true }, { t: `${Math.round(five.percentUsed)}%`, c, b: true }, ...(narrow || !r || r <= now ? [] : [{ t: '  ↻' + fmtDur(r - now), d: true }])])
-    for (const row of brailleLine(fs.map(x => x.pct), w, narrow ? 2 : 3)) body.push([{ t: row, c }])
-  } else if (five) limit('5h', five)
+  if (five) limit('5h', five)
+  if (five && fs.length >= FIVE_CHART_MIN) {
+    const ps = fs.map(x => x.pct), lo = Math.min(...ps), hi = Math.max(...ps)
+    if (hi - lo >= FIVE_CHART_SPREAD) for (const row of brailleLine(ps, w, narrow ? 2 : 3, hi, lo)) body.push([{ t: row, c: level(five.percentUsed) }])
+  }
   const week = d.limits.find(l => /seven|week|7d/i.test(l.kind))
   if (week) limit('week', week)
   const tk = tokenSplit(d.tokens)
@@ -544,7 +550,7 @@ export function agentStep(list: DeckAgent[], id: string, x: { model: string; tok
 }
 
 export type StepUsage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
-type StepState = { tokens: DeckData['tokens']; agents?: DeckAgent[]; model?: string; effort?: string }
+type StepState = { tokens: DeckData['tokens']; agents?: DeckAgent[]; model?: string; effort?: string; delegated?: number }
 
 /**
  * One model step, routed: a sub agent's (it has `agentId`) goes to its own card only; the main loop's sets the
@@ -553,7 +559,7 @@ type StepState = { tokens: DeckData['tokens']; agents?: DeckAgent[]; model?: str
 export function applyStep<S extends StepState>(s: S, e: { agentId?: string; model: string; effort?: unknown }, u: StepUsage | undefined, now: number, info?: { task?: string; type?: string }): S {
   if (e.agentId) {
     const tokens = u ? u.input_tokens + u.cache_creation_input_tokens + u.output_tokens : 0
-    return { ...s, agents: agentStep(s.agents ?? [], e.agentId, { model: e.model, tokens, now, ...info }) }
+    return { ...s, delegated: (s.delegated ?? 0) + tokens, agents: agentStep(s.agents ?? [], e.agentId, { model: e.model, tokens, now, ...info }) }
   }
   return {
     ...s,

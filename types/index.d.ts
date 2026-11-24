@@ -23,6 +23,8 @@ export type DeckState = {
   lean?: 'off' | 'lite' | 'full'
   /** The model the built-in advisor runs on (Claude Code's `advisorModel` setting). */
   advisorModel?: string
+  /** Cumulative sub-agent tokens (input + cache writes + output), kept even when old agent cards are dropped. */
+  delegated?: number
   branch?: string
   dirty?: number
   tests?: { ok: boolean; text: string; at: number }
