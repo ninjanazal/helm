@@ -393,7 +393,7 @@ test('series: 5h per minute, resets with its window', () => {
 })
 
 test('usage: context bar without a trail, and the 5h braille chart', () => {
-  const ser = { ctxSeries: [20, 30, 45, 59], fiveSeries: [0, 5, 10, 15, 20, 25, 30, 35, 40, 42].map((pct, i) => ({ at: i * 60_000, pct })) }
+  const ser = { ctxSeries: [20, 30, 45, 59], fiveSeries: Array.from({ length: 30 }, (_, i) => ({ at: i * 60_000, pct: Math.round((i * 42) / 29) })) }
   const rows = (w: number, x = {}) => deck(data({ ...ser, ...x }), w, 0, 3.6e6).find(s => s.id === 'usage')!.body.map(l => l.map(s => s.t).join(''))
   const B = /[⠁-⣿]/
   const u = rows(46)
@@ -423,10 +423,15 @@ test('usage: context bar without a trail, and the 5h braille chart', () => {
   const few = rows(46, { ctxSeries: [59], fiveSeries: [{ at: 0, pct: 42 }] })
   expect(few.some(r => B.test(r))).toBe(false)
   expect(few.some(r => /^5h .*42%/.test(r))).toBe(true)
-  // under ten minutes of 5h samples: the meter, not a near-empty chart
-  const early = rows(46, { fiveSeries: ser.fiveSeries.slice(0, 9) })
+  // under half an hour of 5h samples: the meter, not a near-empty chart
+  const early = rows(46, { fiveSeries: ser.fiveSeries.slice(0, 29) })
   expect(early.some(r => /^5h .*▰.*42%/.test(r))).toBe(true)
   expect(early.slice(1).some(r => B.test(r))).toBe(false)
+  // a long but flat series (9% for 40 minutes): the meter, and no row of only spaces
+  const flat = rows(46, { limits: [{ kind: 'five_hour', percentUsed: 9, resetsAt: 3 * 3600 }, { kind: 'seven_day', percentUsed: 8, resetsAt: 5 * 3600 }], fiveSeries: Array.from({ length: 40 }, (_, i) => ({ at: i * 60_000, pct: 9 })) })
+  expect(flat.some(r => /^5h .*▰.*9%/.test(r))).toBe(true)
+  expect(flat.some(r => B.test(r))).toBe(false)
+  expect(flat.every(r => r.trim() !== '')).toBe(true)
   // no 5h limit (API key): no 5h block
   expect(rows(46, { limits: [] }).some(r => r.startsWith('5h'))).toBe(false)
 })
