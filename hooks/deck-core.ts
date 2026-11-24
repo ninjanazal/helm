@@ -29,6 +29,8 @@ export type DeckData = {
   testing?: 'off' | 'light' | 'thorough'
   /** helm's advisor level, as stored. */
   advisor?: 'low' | 'mid' | 'high'
+  /** The model the built-in advisor runs on (Claude Code's `advisorModel` setting). */
+  advisorModel?: string
   branch?: string
   /** Working tree vs HEAD: changed files (tracked and untracked) and the tracked lines added and removed. */
   changes?: { files: number; added: number; removed: number }
@@ -147,6 +149,12 @@ export function drift(ctxPct: number, topic: number, turns: number): Drift {
 }
 
 // ── drawing helpers ───────────────────────────────────────
+
+/** haiku < sonnet < opus < fable, by substring; an unknown name has no rank. */
+export const modelRank = (name?: string): number | undefined => {
+  const i = ['haiku', 'sonnet', 'opus', 'fable'].findIndex(f => (name ?? '').toLowerCase().includes(f))
+  return i < 0 ? undefined : i
+}
 
 export const len = (l: Line) => l.reduce((a, s) => a + [...s.t].length, 0)
 
@@ -279,14 +287,11 @@ export function wrapText(text: string, w: number, max: number): string[] {
  * mark, why it drifts: every factor at 25% or more of its cap, strongest first, with the detail that shows it.
  * Works for any task, not only code.
  */
-export function focusNote(d: Pick<DeckData, 'taskTerms' | 'recent' | 'drift' | 'turns'>, w: number): Line[] {
+export function focusNote(d: Pick<DeckData, 'taskTerms' | 'recent' | 'drift' | 'turns' | 'task' | 'cur'>, w: number): Line[] {
   const dr = d.drift
   const rows: Line[] = []
-  const on = keywords(d.taskTerms, 5)
-  if (on.length) {
-    const lead = 'Working on: '
-    wrapText(lead + on.join(', ') + '.', w, 2).forEach((r, i) => rows.push(i === 0 && r.startsWith(lead) ? [{ t: lead, d: true }, { t: r.slice(lead.length), b: true }] : [{ t: r, b: true }]))
-  }
+  if (d.task) for (const r of wrapText(d.task, w, 2)) rows.push([{ t: r, b: true }])
+  if (d.cur?.doing) rows.push([{ t: wrapText(`${d.cur.doing} ${d.cur.target ?? ''}`.trim(), w, 1)[0] ?? '', d: true }])
   if (dr.score < DRIFT_WARN) return rows
   const stray = strayWords(d, 3)
   const factors = [
@@ -405,12 +410,21 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
     return [{ t: label + ' ', d: true }, { t: '▰'.repeat(n), c: 'success' }, { t: '▱'.repeat(all.length - 1 - n), c: 'subtle' }, { t: ' ' + cur, c: 'success', b: true }]
   }
   const settings: Line[] = []
-  if (modelRow.length) settings.push(modelRow)
+  if (modelRow.length) settings.push([{ t: ' '.repeat(Math.max(0, (w - len(modelRow)) >> 1)) }, ...modelRow], [])
   const modes: Line[] = []
   if (d.lean) modes.push(choice('lean', ['off', 'lite', 'full'], d.lean))
   if (d.workload) modes.push(choice('workload', ['off', 'sometimes', 'always'], d.workload))
   if (d.testing) modes.push(choice('testing', ['off', 'light', 'thorough'], d.testing))
-  if (d.advisor) modes.push(choice('advisor', ['low', 'mid', 'high'], d.advisor))
+  if (d.advisor) {
+    const chip = choice('advisor', ['low', 'mid', 'high'], d.advisor)
+    if (d.advisorModel) {
+      const name = d.advisorModel.replace(/^claude-/, '').replace(/-\d{8}$/, '')
+      const a = modelRank(d.advisorModel), m = modelRank(d.model)
+      chip.push({ t: ' ' }, { t: name, b: true })
+      if (a !== undefined && m !== undefined) chip.push(a < m ? { t: narrow ? ' ⚠' : ' ⚠ weaker', c: 'warning', b: true } : a === m ? { t: ' =', d: true } : { t: '' })
+    }
+    modes.push(chip)
+  }
   // centred 2x2 grid, filled row by row: lean | workload, testing | advisor; one column when the block is wider than w
   const colW = (c: number, n: number) => Math.max(0, ...modes.filter((_, i) => i % n === c).map(len))
   const cols = modes.length > 1 && colW(0, 2) + 2 + colW(1, 2) <= w ? 2 : 1
@@ -430,7 +444,7 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
     const edited = d.touched.filter(t => t.edited).length
     items.push([{ t: '✎ ', c: 'claude' }, { t: String(edited), b: true }, { t: ' edited', d: true }, ...(d.touched.length - edited ? [{ t: ` ${d.touched.length - edited} read`, d: true }] : [])])
   }
-  sec('head', '▣ TASK', 'claude', [goal, ...settings, ...(settings.length ? [[]] : []), ...flow(items, w)], ph.kind !== 'idle')
+  sec('head', '▣ TASK', 'claude', [goal, ...settings, ...(modes.length ? [[]] : []), ...flow(items, w)], ph.kind !== 'idle')
 
   // focus: how far the session has drifted from the task
   const hi = d.drift.score >= DRIFT_AT

@@ -21,6 +21,8 @@ export type DeckState = {
   effort?: string
   /** helm's lean level, as stored. */
   lean?: 'off' | 'lite' | 'full'
+  /** The model the built-in advisor runs on (Claude Code's `advisorModel` setting). */
+  advisorModel?: string
   branch?: string
   dirty?: number
   tests?: { ok: boolean; text: string; at: number }

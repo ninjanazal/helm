@@ -52,6 +52,19 @@ export async function readAdvisor($: EngineInterface): Promise<AdvisorLevel> {
   try { return asAdvisor(await $.store.get(storeKey)) ?? DEFAULT_ADVISOR } catch { return DEFAULT_ADVISOR }
 }
 
+/** The advisor's model: Claude Code's `advisorModel` setting, project local, then project, then user. */
+export async function readAdvisorModel($: EngineInterface): Promise<string | undefined> {
+  const root = (await $.session.cwd().catch(() => undefined)) ?? '.'
+  const home = String((await $.process.run(['printenv', 'HOME'], { timeoutMs: 3000 }).catch(() => undefined))?.stdout ?? '').trim()
+  for (const p of [`${root}/.claude/settings.local.json`, `${root}/.claude/settings.json`, ...(home ? [`${home}/.claude/settings.json`] : [])]) {
+    try {
+      const m = JSON.parse(String(await $.fs.read(p))).advisorModel
+      if (typeof m === 'string' && m.trim()) return m.trim()
+    } catch { /* next */ }
+  }
+  return undefined
+}
+
 /** The section for this session. */
 export async function advisorSection($: EngineInterface): Promise<string> {
   return advisorText(await readAdvisor($))

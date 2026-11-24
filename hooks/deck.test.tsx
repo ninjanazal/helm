@@ -42,7 +42,7 @@ test('deck: every section, fits the width, animates only while running', () => {
   expect(t).not.toContain('■')
   // no live activity section, and no pace or forecast lines
   expect(on.some(x => x.id === 'now')).toBe(false)
-  for (const x of ['editing hooks/deck-core.ts', 'at this pace', 'full in']) expect(t).not.toContain(x)
+  for (const x of ['at this pace', 'full in']) expect(t).not.toContain(x)
   for (const sec of on) for (const l of sec.body) expect(len(l)).toBeLessThanOrEqual(46)
   // the usage meters' bars line up whatever their values say
   const wk0 = deck(data({ limits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: 3 * 3600 }, { kind: 'seven_day', percentUsed: 23, resetsAt: 5 * 3600 }] }), 46, 7, now)
@@ -79,24 +79,25 @@ test('deck: every section, fits the width, animates only while running', () => {
 test('task: goal, now, model / effort / lean chips, then the facts wrapped without cutting an item', () => {
   const [top, ...rest] = deck(data(), 30, 0, 3.6e6)[0]!.body.map(l => l.map(s => s.t).join(''))
   expect(top).toContain('Add GDScript')
-  expect(rest.join('|')).toBe(' opus-5-5  ▰▰▱▱ medium||1h 00m · 12 turns · ⎇ main|3 files +40 −7|✎ 1 edited 2 read')
+  expect(rest.join('|')).toBe('     opus-5-5  ▰▰▱▱ medium||1h 00m · 12 turns · ⎇ main|3 files +40 −7|✎ 1 edited 2 read')
   // the live state is not repeated in the task section
   const busy = deck(data({ running: true, phase: { kind: 'tool', verb: 'editing', target: 'hooks/deck.tsx' } }), 40, 0, 3.6e6)[0]!.body.map(l => l.map(s => s.t).join(''))
   expect(busy.join('|')).not.toMatch(/editing|idle|writing/)
   // the model chip is a fill in a theme colour
-  expect(deck(data(), 40, 0, 3.6e6)[0]!.body[1]![0]).toMatchObject({ t: ' opus-5-5 ', bg: 'claude' })
+  expect(deck(data(), 40, 0, 3.6e6)[0]!.body[1]![1]).toMatchObject({ t: ' opus-5-5 ', bg: 'claude' })
 })
 
 test('focus: the task keywords, and why it drifts only once it does', () => {
   const rows = (x: object, w = 60) => deck(data(x), w, 0, 3.6e6).find(s => s.id === 'focus')!.body.map(l => l.map(s => s.t).join(''))
   const base = { taskTerms: ['gdscript', 'deck', 'tool', 'chart', 'extra'], recent: [['deck', 'invoice', 'billing']], turns: 9 }
-  expect(rows({ ...base, drift: drift(10, 0, 2) })[1]).toBe('Working on: gdscript, deck, tool, chart, extra.')
-  expect(rows({ ...base, drift: drift(10, 0, 2) })).toHaveLength(2)
-  expect(rows({ ...base, drift: drift(95, 0.5, 2) }).slice(2).join(' ')).toBe('Drifting: the context is 95% full; recent prompts are about invoice, billing, not the task.')
-  expect(rows({ ...base, drift: drift(50, 1, 2) }).slice(2).join(' ')).toBe('Drifting: recent prompts are about invoice, billing, not the task; the context is 50% full.')
-  expect(rows({ ...base, drift: drift(30, 0.6, 60) }).slice(2).join(' ')).toBe('Drifting: 9 turns on this task; recent prompts are about invoice, billing, not the task; the context is 30% full.')
+  expect(rows({ ...base, drift: drift(10, 0, 2) })[1]).toContain('Add GDScript support to the parser')
+  expect(rows({ ...base, drift: drift(10, 0, 2) })[2]).toContain('editing hooks/deck-core.ts')
+  expect(rows({ ...base, drift: drift(10, 0, 2) })).toHaveLength(3)
+  expect(rows({ ...base, drift: drift(95, 0.5, 2) }).slice(3).join(' ')).toBe('Drifting: the context is 95% full; recent prompts are about invoice, billing, not the task.')
+  expect(rows({ ...base, drift: drift(50, 1, 2) }).slice(3).join(' ')).toBe('Drifting: recent prompts are about invoice, billing, not the task; the context is 50% full.')
+  expect(rows({ ...base, drift: drift(30, 0.6, 60) }).slice(3).join(' ')).toBe('Drifting: 9 turns on this task; recent prompts are about invoice, billing, not the task; the context is 30% full.')
   // no task yet: no focus line
-  expect(rows({ taskTerms: [], drift: drift(10, 0, 2) })).toHaveLength(1)
+  expect(rows({ taskTerms: [], task: undefined, cur: undefined, drift: drift(10, 0, 2) })).toHaveLength(1)
 })
 
 test('marquee: fits as is; too long scrolls while running, is cut with … when idle', () => {
@@ -450,4 +451,13 @@ test('pipeline: each phase draws its own row, idle is still, short or narrow dra
   expect(pipeline({ kind: 'thinking' }, 0, 30, 2)).toEqual([])
   expect(pipeline({ kind: 'thinking' }, 0, 23, 3)).toEqual([])
   expect(pipeline(toolPhase('Bash', { command: 'make check 2>&1' }), 0, 40, 3)[2]!.map(s => s.t).join('').trim()).toBe('⠋ testing make check')
+})
+
+test('task: advisor model warns when weaker than the session model', () => {
+  const text = (w: number, d: Partial<Parameters<typeof data>[0]>) => deck(data({ advisor: 'mid', ...d }), w, 0, 3.6e6)[0]!.body.map(l => l.map(s => s.t).join('').trim())
+  expect(text(80, { model: 'sonnet-5-5', advisorModel: 'haiku' }).some(l => l.includes('⚠ weaker'))).toBe(true)
+  expect(text(80, { model: 'sonnet-5-5', advisorModel: 'opus' }).some(l => l.includes('mid opus'))).toBe(true)
+  expect(text(80, { model: 'sonnet-5-5', advisorModel: 'opus' }).some(l => l.includes('⚠'))).toBe(false)
+  expect(text(80, { model: 'sonnet-5-5' }).some(l => l.includes('mid opus'))).toBe(false)
+  for (const w of [30, 40, 80]) expect(text(w, { model: 'sonnet-5-5', advisorModel: 'haiku' }).every(l => [...l].length <= w)).toBe(true)
 })
