@@ -185,6 +185,23 @@ test('a step is routed: sub-agent tokens go to the agent card, the main total co
   expect(s.agents).toEqual([{ id: 'a1', task: 'audit hooks', type: 'Explore', model: 'haiku-5-5', tokens: 320, steps: 2, startedAt: 10 }])
 })
 
+test('workload chip shows the measured delegated share', () => {
+  const txt = (o: Partial<DeckData>) => deck(data({ workload: 'always', ...o }), 80, 0, 3.6e6)[0]!.body.map(l => l.map(s => s.t).join('')).join('\n')
+  expect(txt({})).not.toContain('delegated')
+  expect(txt({ delegated: 0 })).not.toContain('delegated')
+  expect(txt({ tokens: { input: 200, output: 100, cacheRead: 0, cacheWrite: 0 }, delegated: 100 })).toContain('25% delegated')
+  expect(txt({ tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, delegated: 100 })).toContain('100% delegated')
+  expect(txt({ tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, delegated: 0 })).not.toContain('NaN')
+})
+
+test('delegated sums every sub-agent step even after old cards are dropped', () => {
+  const u = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+  let s = { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } } as { tokens: DeckData['tokens']; agents?: DeckData['agents']; delegated?: number }
+  for (let i = 0; i < 8; i++) s = applyStep(s, { agentId: `g${i}`, model: 'claude-haiku-5-5' }, u, i)
+  expect(s.delegated).toBe(120)
+  expect(s.agents!.length).toBe(6)
+})
+
 test('tab layout: lower-case filled title tabs with a rule; the light sweeps only while running', () => {
   const secs = deck(data({ agents: [agent('a')] }), 44, 7, 3.6e6)
   const on = layout(secs, 46, 7, true).map(l => l.map(s => s.t).join(''))
@@ -393,16 +410,15 @@ test('series: 5h per minute, resets with its window', () => {
 })
 
 test('usage: context bar without a trail, and the 5h braille chart', () => {
-  const ser = { ctxSeries: [20, 30, 45, 59], fiveSeries: [0, 5, 10, 15, 20, 25, 30, 35, 40, 42].map((pct, i) => ({ at: i * 60_000, pct })) }
+  const ser = { ctxSeries: [20, 30, 45, 59], fiveSeries: Array.from({ length: 30 }, (_, i) => ({ at: i * 60_000, pct: Math.round((i * 42) / 29) })) }
   const rows = (w: number, x = {}) => deck(data({ ...ser, ...x }), w, 0, 3.6e6).find(s => s.id === 'usage')!.body.map(l => l.map(s => s.t).join(''))
   const B = /[⠁-⣿]/
   const u = rows(46)
   expect(u[0]).toMatch(/^context .*59%/)
   expect(u[0]).not.toMatch(B)
-  expect(u[1]).toMatch(/^5h +42% +↻/)
-  expect(u.slice(2, 5).every(r => r.length === 46)).toBe(true)
-  expect(u.slice(2, 5).some(r => B.test(r))).toBe(true)
-  expect(u.length).toBeLessThanOrEqual(8)
+  expect(u[1]).toMatch(/^5h .*▰.*42% +↻/)
+  expect(u.slice(2, 5).every(r => r.length === 46 && B.test(r))).toBe(true)
+  expect(u.length).toBeLessThanOrEqual(9)
   expect(rows(46, { limits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: 3 * 3600 }, { kind: 'seven_day', percentUsed: 23, resetsAt: 5 * 3600 }] }).length).toBeLessThanOrEqual(8)
   for (const r of u) expect([...r].length).toBeLessThanOrEqual(46)
   expect(rows(46, { limits: [{ kind: 'five_hour', percentUsed: 42 }] })[1]).not.toContain('↻')
@@ -414,21 +430,36 @@ test('usage: context bar without a trail, and the 5h braille chart', () => {
     if (w >= 13) expect(c).toContain('59%')
   }
   const n = rows(32)
-  expect(n[1]).not.toContain('↻')
-  // two chart rows at narrow widths; 0-42% only reaches the lower one
-  expect(n.slice(2, 4).every(r => r.length === 32)).toBe(true)
-  expect(n.slice(2, 4).filter(r => B.test(r)).length).toBe(1)
+  expect(n[1]).toMatch(/^5h .*▰.*42%/)
+  // two chart rows at narrow widths, scaled to the series so both have a line
+  expect(n.slice(2, 4).every(r => r.length === 32 && B.test(r))).toBe(true)
   for (const r of n) expect([...r].length).toBeLessThanOrEqual(32)
   // fewer than 2 samples: plain meters, no braille
   const few = rows(46, { ctxSeries: [59], fiveSeries: [{ at: 0, pct: 42 }] })
   expect(few.some(r => B.test(r))).toBe(false)
   expect(few.some(r => /^5h .*42%/.test(r))).toBe(true)
-  // under ten minutes of 5h samples: the meter, not a near-empty chart
-  const early = rows(46, { fiveSeries: ser.fiveSeries.slice(0, 9) })
+  // under half an hour of 5h samples: the meter only, no chart
+  const early = rows(46, { fiveSeries: ser.fiveSeries.slice(0, 29) })
   expect(early.some(r => /^5h .*▰.*42%/.test(r))).toBe(true)
   expect(early.slice(1).some(r => B.test(r))).toBe(false)
+  // a long but flat series (9% for 40 minutes): the meter only, and no row of only spaces
+  const flat = rows(46, { limits: [{ kind: 'five_hour', percentUsed: 9, resetsAt: 3 * 3600 }, { kind: 'seven_day', percentUsed: 8, resetsAt: 5 * 3600 }], fiveSeries: Array.from({ length: 40 }, (_, i) => ({ at: i * 60_000, pct: 9 })) })
+  expect(flat.some(r => /^5h .*▰.*9%/.test(r))).toBe(true)
+  expect(flat.some(r => B.test(r))).toBe(false)
+  expect(flat.every(r => r.trim() !== '')).toBe(true)
   // no 5h limit (API key): no 5h block
   expect(rows(46, { limits: [] }).some(r => r.startsWith('5h'))).toBe(false)
+})
+
+test('usage: the 5h bar stays when the chart shows, and the chart is scaled to its own range', () => {
+  const lim = [{ kind: 'five_hour', percentUsed: 13, resetsAt: 4 * 3600 }, { kind: 'seven_day', percentUsed: 8, resetsAt: 5 * 3600 }]
+  const rows = (n: number, w = 46) => deck(data({ limits: lim, fiveSeries: Array.from({ length: n }, (_, i) => ({ at: i * 60_000, pct: 4 + Math.round((i * 9) / Math.max(1, n - 1)) })) }), w, 0, 3.6e6).find(s => s.id === 'usage')!.body.map(l => l.map(s => s.t).join(''))
+  const r = rows(40)
+  expect(r.some(x => /^5h .*▰.*13%/.test(x))).toBe(true)
+  expect(r.every(x => x.trim() !== '')).toBe(true)
+  expect(r.filter(x => /[⠁-⣿]/.test(x)).length).toBeGreaterThanOrEqual(2)
+  expect(rows(40, 32).every(x => x.trim() !== '')).toBe(true)
+  expect(rows(1).some(x => /[⠁-⣿]/.test(x))).toBe(false)
 })
 
 test('pipeline: each phase draws its own row, idle is still, short or narrow draws nothing', () => {

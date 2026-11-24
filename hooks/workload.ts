@@ -25,13 +25,16 @@ const LEAN_LINE = 'Lean: answer first, no recap, smallest complete change, keep 
 export function workloadText(mode: Mode, lean = true): string | undefined {
   if (mode === 'off') return undefined
   const when = mode === 'always'
-    ? 'Delegate all implementation: spawn every implementation unit with the Agent tool, one agent per unit, and do not edit files yourself except to fix a unit that failed its check twice. You keep planning, decisions, review and the final verification.'
-    : 'Delegate only units that are mechanical or independent: 3+ units on disjoint files, each with its own deterministic check. Do small, coupled or judgement-heavy work yourself.'
+    ? 'Delegate every implementation, exploration, test and doc unit: spawn each with the Agent tool, one agent per unit, and do not edit files yourself except to fix a unit that failed its check twice. You keep planning, decisions, review and the final verification.'
+    : 'Use judgement: delegate a unit when running it on a lighter model or lower effort is clearly cheaper and it can be briefed exactly (files, symbols, change, check command); otherwise do it inline.'
+  const model = mode === 'always'
+    ? 'Spawn each unit with the Agent tool and set `model`: haiku (effort low) for mechanical edits (rename, move, boilerplate, tests from a spec), sonnet (effort medium) for units that need reading and judging code, including units that are hard to brief. A unit runs on a cheaper model, or on your own model at low effort only; never your own model at your own effort.'
+    : 'Spawn each unit with the Agent tool and set `model`: haiku for mechanical edits (rename, move, boilerplate, tests from a spec), sonnet for units that need reading and judging code. A unit must cost less than you: a cheaper model, or your own model with `effort` set lower (low for mechanical, medium for judging). Never give a unit your own model at your own effort.'
   const rules = [
-    'Delegate only after the plan is settled and you are confident in it; until then work inline.',
     when,
-    'Spawn each unit with the Agent tool and set `model`: haiku for mechanical edits (rename, move, boilerplate, tests from a spec), sonnet for units that need reading and judging code. A unit must cost less than you: a cheaper model, or your own model with `effort` set lower (low for mechanical, medium for judging). Never give a unit your own model at your own effort.',
-    'Write each brief so a cheaper model needs no judgement: the exact files and symbols, the change to make (code or a precise description), and the command that proves it. If you cannot be that precise, do the unit yourself.',
+    'The plan lists the model and effort for every unit, and the person approves the plan before any unit is dispatched.',
+    model,
+    'Write each brief so a cheaper model needs no judgement: the exact files and symbols, the change to make (code or a precise description), and the command that proves it.',
     `Brief each unit with only its goal, files and check${lean ? `, starting with "${LEAN_LINE}" (sub agents do not inherit this prompt)` : ''}.`,
     'Units never share a file; independent units run in parallel.',
     'Review every result against its check. A unit that fails its check twice comes back to you; do not retry it blindly.',

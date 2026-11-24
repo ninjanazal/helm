@@ -74,13 +74,13 @@ Fix it, don't just flag it, if any of these is true:
 
 ## 4b. Offer to split the work (only when it fits)
 First read the workload mode: the file `.claude/helm/workload` if it exists, else call `mcp__helm__workload` with
-`{ "action": "status" }`. `off`: skip this step silently, never offer a split. `always`: when the work has 2+
-units, split without asking (still pick a model per unit) and skip the question below. `sometimes`: as follows.
+`{ "action": "status" }`. `off`: skip this step silently, never offer a split. `always`: split every
+time, even a single unit going to one cheaper agent, without asking (still pick a model and effort per unit) and
+skip the question below. `sometimes`: as follows.
 
-Once the prompt passes step 4, and before showing it, judge whether the task is big enough to split. It is when
-**all** hold: it breaks into 3+ units that touch disjoint files, each unit has its own deterministic check, and
-no unit needs a design decision from another. Small, tightly coupled or judgement-heavy work is not split:
-skip this step silently, don't ask.
+Once the prompt passes step 4, and before showing it, judge whether splitting pays. Offer it when handing units to
+a cheaper model or lower effort has a clear cost advantage and each unit can be briefed exactly with its own
+check. Small, tightly coupled or judgement-heavy work is not split: skip this step silently, don't ask.
 
 If it fits, ask in one `AskUserQuestion` (recommended option first):
 "This is big enough to hand to cheaper-model sub agents. Split it?"
@@ -92,8 +92,9 @@ On split, add this block after `<acceptance>`, one entry per unit, and keep the 
 ```xml
 <split>
   Host: plans, hands out units, reviews every result against its check, runs the whole-task acceptance.
-  - unit 1 [model: haiku|sonnet]: what to do · scope (files) · check (command) · depends on: none
+  - unit 1 [model · effort], e.g. [haiku · low], [sonnet · medium]: what to do · scope (files) · check (command) · depends on: none
   - unit 2 ...
+  The model · effort per unit is what the person approves in step 5, before any dispatch.
   Rules: units never share a file; give each sub agent only its unit, scope and check; a unit that fails its
   check twice comes back to the host, not retried blindly; independent units run in parallel.
   Lean: start every unit brief with "Lean: answer first, no recap, smallest complete change, keep checks and
@@ -101,8 +102,8 @@ On split, add this block after `<acceptance>`, one entry per unit, and keep the 
   only if the person turned lean off (`/helm:lean off`).
 </split>
 ```
-Pick Haiku for mechanical edits (rename, move, boilerplate, tests from a spec) and Sonnet for units that need
-reading and judging code. If the person declines, write nothing and don't ask again.
+Pick haiku/low for mechanical edits (rename, move, boilerplate, tests from a spec) and sonnet/medium for units
+that read and judge code. If the person declines, write nothing and don't ask again.
 
 ## 4c. Ask the advisor about the draft
 Read the advisor level: the file `.claude/helm/advisor` if it exists, else call `mcp__helm__advisor` with
@@ -111,6 +112,7 @@ parameters; not `mcp__helm__advisor`, which only sets the level), call it once o
 
 ## 5. Get it approved
 Show the prompt in one fenced block, then one line: "Approve it, edit it, or change the scope?"
+- Approval covers the model and effort per unit in `<split>`, if any.
 - If they edit: apply the edits, re-check step 4, and show it again.
 - Do not start the work in this step, even if they say "run it": approval comes first, then step 6.
 

@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.." || exit 1
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/bin"
 for c in claude; do
-  printf '#!/bin/sh\necho "%s $*" >> "%s/calls"\n[ "$1 $2" = "plugin list" ] && cat "%s/list" 2>/dev/null\ncase "%s $*" in $STUB_FAIL) exit 1;; esac\nexit 0\n' "$c" "$T" "$T" "$c" > "$T/bin/$c"; chmod +x "$T/bin/$c"
+  printf '#!/bin/sh\necho "%s $*" >> "%s/calls"\n[ "$1 $2" = "plugin list" ] && cat "%s/list$([ "$3" = --json ] && echo .json)" 2>/dev/null\ncase "%s $*" in $STUB_FAIL) exit 1;; esac\nexit 0\n' "$c" "$T" "$T" "$c" > "$T/bin/$c"; chmod +x "$T/bin/$c"
 done
 export PATH="$T/bin:$PATH" NO_COLOR=1 HELM_IN_TEST=1
 unset SCOPE FROM PIECES HELM_YES STUB_FAIL
@@ -66,9 +66,10 @@ reset; STUB_FAIL='claude plugin install helm*' PIECES=helm sh scripts/helm.sh se
 reset; STUB_FAIL='claude plugin test*' sh scripts/helm.sh test > "$T/out" 2>&1; e=$?
 [ $e -ne 0 ] && ok 'test: failing plugin tests fail the run' || bad 'test: failing plugin tests fail the run'
 printf 'helm@helm\n  Scope: local\n' > "$T/list"
+printf '[{"id":"helm@helm","scope":"local","projectPath":"%s"}]\n' "$(pwd)" > "$T/list.json"
 reset; SCOPE=local sh scripts/helm.sh install helm < /dev/null > "$T/out" 2>&1
 ! has "$T/calls" 'plugin update' && has "$T/out" 'already installed' && ok 'install helm: installed means no-op' || bad 'install helm: installed means no-op'
-rm -f "$T/list"
+rm -f "$T/list" "$T/list.json"
 reset; SCOPE=local sh scripts/helm.sh install atlas < /dev/null > "$T/out" 2>&1; e=$?
 [ $e -eq 1 ] && has "$T/out" 'unknown piece: atlas' && [ ! -s "$T/calls" ] && ok 'install atlas: no longer a piece' || bad 'install atlas: no longer a piece'
 reset; YES=1 sh scripts/helm.sh remove < /dev/null > "$T/out" 2>&1; e=$?
