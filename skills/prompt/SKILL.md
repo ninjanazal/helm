@@ -92,7 +92,7 @@ On split, add this block after `<acceptance>`, one entry per unit, and keep the 
 ```xml
 <split>
   Host: plans, hands out units, reviews every result against its check, runs the whole-task acceptance.
-  - unit 1 [model · effort], e.g. [haiku · low], [sonnet · medium]: what to do · scope (files) · check (command) · depends on: none
+  - unit 1 [model · effort], e.g. [haiku · low], [sonnet · low]: what to do · scope (files) · check (command) · depends on: none
   - unit 2 ...
   The model · effort per unit is what the person approves in step 5, before any dispatch.
   Rules: units never share a file; give each sub agent only its unit, scope and check; a unit that fails its
@@ -102,8 +102,10 @@ On split, add this block after `<acceptance>`, one entry per unit, and keep the 
   only if the person turned lean off (`/helm:lean off`).
 </split>
 ```
-Pick haiku/low for mechanical edits (rename, move, boilerplate, tests from a spec) and sonnet/medium for units
-that read and judge code. If the person declines, write nothing and don't ask again.
+A unit's model and effort are each never above the host's, and at least one is strictly lower, so it is always
+cheaper (models rank haiku < sonnet < opus; effort low < medium < high < xhigh < max). Mechanical work (rename,
+move, boilerplate, tests from a spec) goes low on the ladder, e.g. haiku · low; units that read and judge code go
+higher but still under the host. If nothing is cheaper than the host, run the unit inline. If the person declines, write nothing and don't ask again.
 
 ## 4c. Ask the advisor about the draft
 Read the advisor level: the file `.claude/helm/advisor` if it exists, else call `mcp__helm__advisor` with

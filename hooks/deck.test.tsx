@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { fmtDur, addCtx, addFive, agentDone, agentStep, agentTag, applyStep, applyTodo, bar, brailleLine, isDeckOn, deck, pipeline, toolPhase, live, marquee, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
+import { keepLimits, FIVE_CHART_MIN, FIVE_CHART_SPREAD, fmtDur, addCtx, addFive, agentDone, agentStep, agentTag, applyStep, applyTodo, bar, brailleLine, isDeckOn, deck, pipeline, toolPhase, live, marquee, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
 import type { DeckData, FiveSample } from './deck-core'
 
 const data = (x: Partial<DeckData> = {}): DeckData => ({
@@ -522,4 +522,21 @@ test('task: advisor model warns when weaker than the session model', () => {
   expect(text(80, { model: 'sonnet-5-5', advisorModel: 'opus' }).some(l => l.includes('⚠'))).toBe(false)
   expect(text(80, { model: 'sonnet-5-5' }).some(l => l.includes('mid opus'))).toBe(false)
   for (const w of [30, 40, 80]) expect(text(w, { model: 'sonnet-5-5', advisorModel: 'haiku' }).every(l => [...l].length <= w)).toBe(true)
+})
+
+test('keepLimits: a kind missing from an update is kept until its reset passes', () => {
+  const five = { kind: 'five_hour', percentUsed: 40, resetsAt: 10_000 }
+  expect(keepLimits([five], [], 5_000_000)).toEqual([five])
+  expect(keepLimits([five], [], 11_000_000)).toEqual([])
+  const week = { kind: 'seven_day', percentUsed: 8 }
+  expect(keepLimits([five, week], [{ kind: 'five_hour', percentUsed: 50 }], 0)).toEqual([{ kind: 'five_hour', percentUsed: 50 }, week])
+})
+
+test('usage: the 5h meter shows at narrow and wide widths, with and without a chart', () => {
+  const lim = [{ kind: 'five_hour', percentUsed: 13, resetsAt: 4 * 3600 }]
+  const fiveSeries = Array.from({ length: FIVE_CHART_MIN }, (_, i) => ({ at: i * 60_000, pct: 4 + Math.round((i * (FIVE_CHART_SPREAD + 2)) / (FIVE_CHART_MIN - 1)) }))
+  for (const w of [32, 60]) for (const fs of [[], fiveSeries]) {
+    const r = deck(data({ limits: lim, fiveSeries: fs }), w, 0, 3.6e6).find(s => s.id === 'usage')!.body.map(l => l.map(s => s.t).join(''))
+    expect(r.some(x => x.startsWith('5h') && /[▰▱]/.test(x))).toBe(true)
+  }
 })

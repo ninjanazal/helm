@@ -90,6 +90,16 @@ function resetMs(r: string | number | undefined): number | undefined {
   return Number.isFinite(v) ? v : undefined
 }
 
+/** The new limits by kind; a kind missing from this update keeps its last value until its reset passes. */
+export function keepLimits(prev: DeckData['limits'] | undefined, next: DeckData['limits'], now: number): DeckData['limits'] {
+  const kept = (prev ?? []).filter(p => {
+    if (next.some(n => n.kind === p.kind)) return false
+    const r = resetMs(p.resetsAt)
+    return r === undefined || r > now
+  })
+  return [...next, ...kept]
+}
+
 export const SERIES_CAP = 120
 
 /** The context % after each turn, newest last, at most SERIES_CAP; a non-finite pct adds nothing. */

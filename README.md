@@ -8,7 +8,7 @@ helm is a Claude Code plugin:
 - **`/helm:prompt`:** turns a rough request into a complete, checkable prompt (goal, grounded context, scope, acceptance checks, stop conditions) and saves it as the current task once approved.
 - **Lean mode:** on by default, a short system-prompt section that cuts output tokens. `/helm:lean off` turns it off. Ideas from ponytail and caveman, written natively.
 - **Testing:** `/helm:testing` sets how much testing the host writes and runs: `off` (none unless asked), `light` (default, only for risky logic) or `thorough` (test-first, edge cases, a regression test per bug, the full suite). Like lean, it applies from the next session, `/clear` or compaction, and a project can pin it in `.claude/helm/testing`.
-- **Workload:** `/helm:workload` sets how much work the host hands to cheaper sub agents: `off` never does, `sometimes` (default) hands a unit to a cheaper model or lower effort only where it is clearly cheaper and can be briefed exactly, and `always` hands every unit (implementation, exploration, tests, docs) to haiku (mechanical) or sonnet (judgment) while the host plans, reviews and verifies. In both non-off modes the plan lists model and effort per unit and you approve it before dispatch. The deck's chip shows the measured share, e.g. `25% delegated`. It applies from the next session, `/clear` or compaction, and pins in `.claude/helm/workload`.
+- **Workload:** `/helm:workload` sets how much work the host hands to cheaper sub agents: `off` never does, `sometimes` (default) hands a unit to a cheaper model or lower effort only where it is clearly cheaper and can be briefed exactly, and `always` hands every unit (implementation, exploration, tests, docs) to a cheaper model or effort than the host (haiku < sonnet < opus, never above the host, always cheaper) while the host plans, reviews and verifies. In both non-off modes the plan lists model and effort per unit and you approve it before dispatch. The deck's chip shows the measured share, e.g. `25% delegated`. It applies from the next session, `/clear` or compaction, and pins in `.claude/helm/workload`.
 - **Advisor:** `/helm:advisor` sets how often the model consults the built-in advisor, with planning as the main trigger: `low` (also on the drafted plan), `mid` (default, plus plan changes and before done) or `high` (plus before planning starts and on every revision). Guidance only. It applies the same way and pins in `.claude/helm/advisor`. The task bar also shows the advisor's model (Claude Code's `advisorModel` setting) and warns when it is weaker than the session model.
 - **superpowers** (workflow skills) is installed with helm as a plugin dependency; helm's prompt and commit skills route to it and work without it.
 
@@ -23,6 +23,8 @@ make status    # what is installed, and where
 Then run `/reload-plugins` and `/helm:help` in Claude Code.
 
 From GitHub, without cloning: `/plugin install helm --marketplace ninjanazal/helm`.
+
+After updating helm, restart `claude`: a running session keeps the deck code it started with, and `/clear` does not reload it.
 
 ### Upgrading from atlas
 
@@ -50,7 +52,7 @@ rm -rf .claude/helm/tasks .claude/helm/team.json
 | `/helm:prompt <request>` | The one to work with: give it a task, it builds a complete prompt, and once you approve, "go" runs the pipeline (brainstorming, plans, split to cheaper sub agents) |
 | `/helm:lean [on \| off \| lite \| full]` | Lean mode, on by default: fewer output tokens (answer first, no recap, smallest complete change) without dropping checks. Pin per project with `.claude/helm/lean` |
 | `/helm:testing [off \| light \| thorough]` | How much testing the host writes and runs: `off` none unless asked, `light` (default) only for risky logic, `thorough` test-first with edge cases, regression tests and the full suite. Pin per project with `.claude/helm/testing` |
-| `/helm:workload [off \| sometimes \| always]` | Hand work to cheaper sub agents: `off` never; `sometimes` (default) only where a cheaper model or lower effort is clearly cheaper and exactly briefable; `always` every unit (implementation, exploration, tests, docs) to haiku (mechanical) or sonnet (judgment), host plans and verifies. Non-off modes list model and effort per unit for your approval. The deck chip shows the measured share, e.g. `25% delegated`. Pin per project with `.claude/helm/workload` |
+| `/helm:workload [off \| sometimes \| always]` | Hand work to cheaper sub agents: `off` never; `sometimes` (default) only where a cheaper model or lower effort is clearly cheaper and exactly briefable; `always` every unit (implementation, exploration, tests, docs) to a cheaper model or effort than the host (haiku < sonnet < opus, never above the host, always cheaper), host plans and verifies. Non-off modes list model and effort per unit for your approval. The deck chip shows the measured share, e.g. `25% delegated`. Pin per project with `.claude/helm/workload` |
 | `/helm:advisor [low \| mid \| high]` | How often the model consults the built-in advisor while planning: `low`, `mid` (default), `high`. Pin per project with `.claude/helm/advisor` |
 | `/helm:commit [--dry]` | Commit the staged changes: Conventional Commits subject, bulleted body, no attribution lines |
 | `/helm:help` | The full guide |

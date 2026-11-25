@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import { DRIFT_AT, PANE_FRAME_MS, PIPE_ROWS, TEST_RE, addCtx, addFive, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, layout, live, pipeline, terms, tokenSplit, toolPhase, topicShift, verdict } from './deck-core'
+import { DRIFT_AT, PANE_FRAME_MS, PIPE_ROWS, TEST_RE, addCtx, addFive, keepLimits, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, layout, live, pipeline, terms, tokenSplit, toolPhase, topicShift, verdict } from './deck-core'
 import type { DeckData, FeedItem, Phase, StepUsage } from './deck-core'
 import type { DeckDone, DeckState } from '../types'
 import { readLevel } from './lean'
@@ -49,7 +49,8 @@ async function poll($: EngineInterface) {
   const opts = cwd ? { cwd, timeoutMs: 3000 } : { timeoutMs: 3000 }
   await quiet(async () => {
     const u = await $.session.usage()
-    await set($, s => ({ ...s, ctx: u.context, limits: (u.rateLimits ?? []).map(r => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt })), cost: u.cost?.usd, startedAt: u.startedAt }))
+    const now = await $.clock.now()
+    await set($, s => ({ ...s, ctx: u.context, limits: keepLimits(s.limits, (u.rateLimits ?? []).map(r => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt })), now), cost: u.cost?.usd, startedAt: u.startedAt }))
   })
   await quiet(async () => {
     const lean = await readLevel($)
@@ -262,7 +263,7 @@ export async function deckMeasure($: EngineInterface, e: { context: DeckState['c
   const at = await $.clock.now()
   await quiet(() => set($, s => {
     const l = rl.find(r => /five|5h/i.test(r.kind))
-    return { ...s, ctx: e.context, limits: rl.map(r => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt })), ...addFive(s.fiveSeries, s.fiveAt, l?.percentUsed, l?.resetsAt, at) }
+    return { ...s, ctx: e.context, limits: keepLimits(s.limits, rl.map(r => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt })), at), ...addFive(s.fiveSeries, s.fiveAt, l?.percentUsed, l?.resetsAt, at) }
   }))
 }
 
