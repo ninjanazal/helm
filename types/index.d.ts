@@ -3,7 +3,7 @@ export type DeckTurn = { ask?: string; cost0?: number; seq: string; at: number; 
 export type DeckDone = { n: number; seq: string; tok: number; ms: number; result: 'ok' | 'warn' | 'err' | 'none'; text: string; ask?: string; cost?: number }
 
 /** A sub agent the session started: its own steps and tokens (input + cache writes + output), kept apart from the main totals. */
-export type DeckAgent = { id: string; task: string; type?: string; model?: string; tokens: number; steps: number; startedAt: number; endedAt?: number }
+export type DeckAgent = { id: string; task: string; type?: string; model?: string; effort?: string; tokens: number; steps: number; startedAt: number; endedAt?: number }
 
 /** A task-list item's text and state. */
 export type DeckCheck = { text: string; state: 'todo' | 'working' | 'done' }

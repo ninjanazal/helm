@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { fmtDur, addCtx, addFive, agentDone, agentStep, applyStep, applyTodo, bar, brailleLine, isDeckOn, deck, pipeline, toolPhase, live, marquee, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
+import { fmtDur, addCtx, addFive, agentDone, agentStep, agentTag, applyStep, applyTodo, bar, brailleLine, isDeckOn, deck, pipeline, toolPhase, live, marquee, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
 import type { DeckData, FiveSample } from './deck-core'
 
 const data = (x: Partial<DeckData> = {}): DeckData => ({
@@ -65,7 +65,8 @@ test('deck: every section, fits the width, animates only while running', () => {
   expect(fresh).not.toContain('tokens 0')
   expect(fresh).toContain('your next prompt becomes the task')
   // tokens: in = input + cache writes, out = output; no $/h rate
-  expect(t).toContain('$4.80 · in 2.0k · out 2.0k')
+  expect(t).toContain('$4.80  ·  ↓ 2.0k in  ·  ↑ 2.0k out')
+  expect(t).toMatch(/^ +\$4\.80  ·  ↓ 2\.0k in/m)
   expect(t).not.toContain('/h')
   expect(t).not.toContain('rate ')
   const big = text(deck(data({ tokens: { input: 1000, output: 2000, cacheRead: 1_400_000, cacheWrite: 1000 } }), 46, 0, now))
@@ -140,9 +141,39 @@ test('agents: one compact row each, running first; the title counts running agen
   expect(ag.meta).toBe('1 running · 25k')
   const rows = ag.body.map(l => l.map(s => s.t).join(''))
   expect(rows.length).toBe(2)
-  expect(rows[0]).toMatch(/^⠋ Explore · audit part a +12k 1m$/)
-  expect(rows[1]).toBe('✔ Explore · audit part b · 12k')
-  expect(ag.body[1]![2]!.d).toBe(true)
+  expect(rows[0]).toMatch(/^⠋ audit part a · Explore · haiku-5-5 · 12k 1m$/)
+  expect(rows[1]).toBe('✔ audit part b · Explore · haiku-5-5 · 12k')
+  expect(ag.body[1]![3]!.d).toBe(true)
+})
+
+test('agentTag: general-purpose reads general, other types unchanged, none is empty', () => {
+  expect(agentTag('general-purpose')).toBe('general')
+  expect(agentTag('Explore')).toBe('Explore')
+  expect(agentTag(undefined)).toBe('')
+})
+
+const doneRow = (x: object) => deck(data({ agents: [{ id: 'a', task: 'Rebase root', type: 'general-purpose', model: 'sonnet-5-5', tokens: 40000, steps: 1, startedAt: 0, endedAt: 1, ...x }] }), 60, 0, 3.6e6)
+  .find(s => s.id === 'agents')!.body[0]!.map(s => s.t).join('')
+
+test('agent row: task first, then the tag, then model·effort', () => {
+  const row = doneRow({ effort: 'medium' })
+  expect(row.indexOf('Rebase root')).toBeLessThan(row.indexOf('general'))
+  expect(row).toContain('sonnet-5-5·medium')
+})
+
+test('agent row: without effort the model is followed by a spaced dot', () => {
+  const row = doneRow({})
+  expect(row).toContain('sonnet-5-5 · 40')
+  expect(row).not.toContain('sonnet-5-5·')
+})
+
+test('applyStep: effort is stored on the agent, and a step without effort keeps it', () => {
+  const u = { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+  let s = { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } } as { tokens: DeckData['tokens']; agents?: DeckData['agents'] }
+  s = applyStep(s, { agentId: 'a1', model: 'claude-haiku-5-5', effort: 'high' }, u, 0, { task: 'audit hooks', type: 'Explore' })
+  expect(s.agents![0]!.effort).toBe('high')
+  s = applyStep(s, { agentId: 'a1', model: 'claude-haiku-5-5' }, u, 10)
+  expect(s.agents![0]!.effort).toBe('high')
 })
 
 test('idle frames are static, and every colour is a theme name', () => {

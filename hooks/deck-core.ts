@@ -366,14 +366,21 @@ function flow(items: Line[], w: number, sep?: string): Line[] {
   return rows
 }
 
-/** One sub agent on one row: status, type · task, then tokens and clock; a finished one is one dim line. */
+/** A sub agent's type as a short tag: 'general-purpose' reads 'general'. */
+export function agentTag(type?: string): string {
+  return type === 'general-purpose' ? 'general' : type ?? ''
+}
+
+/** One sub agent on one row: status, task, then tag · model·effort · tokens (and the clock while running); the task clips first. */
 function agentRow(a: DeckAgent, w: number, frame: number, running: boolean, now: number): Line {
-  const label: Line = [...(a.type ? [{ t: a.type, b: true }, { t: ' · ', d: true }] : []), { t: a.task || 'agent', d: true }]
-  if (a.endedAt !== undefined) return [{ t: '✔', c: 'success' }, { t: ' ' }, { t: `${a.type ? a.type + ' · ' : ''}${a.task || 'agent'} · ${fmtTok(a.tokens)}`, d: true }]
-  const icon: Seg = running ? { t: SPIN[frame % SPIN.length]!, c: 'claude', b: true } : { t: '○', c: 'subtle' }
-  const stats: Line = [{ t: fmtTok(a.tokens), b: true }, { t: ' ' + clock(now - a.startedAt), d: true }]
-  const room = Math.max(4, w - 2 - len(stats) - 2)
-  return [icon, { t: ' ' }, ...padTo(clip(label, room), room), { t: '  ' }, ...stats]
+  const done = a.endedAt !== undefined
+  const tag = agentTag(a.type)
+  const parts = [tag, a.model ? a.model + (a.effort ? '·' + a.effort : '') : ''].filter(Boolean)
+  const rest: Line = [...parts.flatMap(p => [{ t: ' · ', d: true }, { t: p, d: true }]), { t: ' · ', d: true }, { t: fmtTok(a.tokens), d: true, ...(done ? {} : { b: true }) }]
+  if (!done) rest.push({ t: ' ' + clock(now - a.startedAt), d: true })
+  const icon: Seg = done ? { t: '✔', c: 'success' } : running ? { t: SPIN[frame % SPIN.length]!, c: 'claude', b: true } : { t: '○', c: 'subtle' }
+  const room = Math.max(4, w - 2 - len(rest) - 1)
+  return [icon, { t: ' ' }, ...clip([{ t: a.task || 'agent', b: true }], room), ...rest]
 }
 
 const MAX_AGENT_ROWS = 4
@@ -484,8 +491,16 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   const week = d.limits.find(l => /seven|week|7d/i.test(l.kind))
   if (week) limit('week', week)
   const tk = tokenSplit(d.tokens)
-  const tail = [d.cost !== undefined ? `$${d.cost.toFixed(2)}` : '', tk.total > 0 ? [`in ${fmtTok(tk.in)}`, `out ${fmtTok(tk.out)}`].join(narrow ? ' ' : ' · ') : ''].filter(Boolean)
-  if (tail.length) body.push([{ t: tail.join(' · '), d: true }])
+  const sep: Seg = { t: narrow ? ' ' : '  ·  ', d: true }
+  const tail: Line[] = []
+  if (d.cost !== undefined) tail.push([{ t: `$${d.cost.toFixed(2)}`, b: true }])
+  if (tk.total > 0) tail.push(narrow
+    ? [{ t: '↓', c: 'suggestion' }, { t: fmtTok(tk.in) }, { t: ' ' }, { t: '↑', c: 'suggestion' }, { t: fmtTok(tk.out) }]
+    : [{ t: '↓ ', c: 'suggestion' }, { t: fmtTok(tk.in) }, { t: ' in', d: true }, sep, { t: '↑ ', c: 'suggestion' }, { t: fmtTok(tk.out) }, { t: ' out', d: true }])
+  if (tail.length) {
+    const line: Line = tail.flatMap((l, i) => (i ? [sep, ...l] : l))
+    body.push([{ t: ' '.repeat(Math.max(0, ((w - 1) - len(line)) >> 1)) }, ...line])
+  }
   if (body.length) sec('usage', '◷ USAGE', 'suggestion', body)
 
   // agents: only while the session has sub agents; running first, then the most recent finished
@@ -542,11 +557,11 @@ export const AGENTS_KEPT = 6
  * A sub agent's model step, added to its own card (created on its first step, with the task and type the engine
  * lists for it). Tokens are input + cache writes + output, as the main totals count them.
  */
-export function agentStep(list: DeckAgent[], id: string, x: { model: string; tokens: number; now: number; task?: string; type?: string }): DeckAgent[] {
+export function agentStep(list: DeckAgent[], id: string, x: { model: string; tokens: number; now: number; task?: string; type?: string; effort?: string }): DeckAgent[] {
   const model = x.model.replace(/^claude-/, '').replace(/-\d{8}$/, '')
   const i = list.findIndex(a => a.id === id)
-  if (i < 0) return [...list, { id, task: x.task ?? '', type: x.type, model, tokens: x.tokens, steps: 1, startedAt: x.now }].slice(-AGENTS_KEPT)
-  return list.map((a, k) => (k === i ? { ...a, model, tokens: a.tokens + x.tokens, steps: a.steps + 1, task: a.task || x.task || '', type: a.type ?? x.type } : a))
+  if (i < 0) return [...list, { id, task: x.task ?? '', type: x.type, model, effort: x.effort, tokens: x.tokens, steps: 1, startedAt: x.now }].slice(-AGENTS_KEPT)
+  return list.map((a, k) => (k === i ? { ...a, model, effort: x.effort ?? a.effort, tokens: a.tokens + x.tokens, steps: a.steps + 1, task: a.task || x.task || '', type: a.type ?? x.type } : a))
 }
 
 export type StepUsage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
@@ -559,7 +574,7 @@ type StepState = { tokens: DeckData['tokens']; agents?: DeckAgent[]; model?: str
 export function applyStep<S extends StepState>(s: S, e: { agentId?: string; model: string; effort?: unknown }, u: StepUsage | undefined, now: number, info?: { task?: string; type?: string }): S {
   if (e.agentId) {
     const tokens = u ? u.input_tokens + u.cache_creation_input_tokens + u.output_tokens : 0
-    return { ...s, delegated: (s.delegated ?? 0) + tokens, agents: agentStep(s.agents ?? [], e.agentId, { model: e.model, tokens, now, ...info }) }
+    return { ...s, delegated: (s.delegated ?? 0) + tokens, agents: agentStep(s.agents ?? [], e.agentId, { model: e.model, tokens, now, effort: e.effort === undefined ? undefined : String(e.effort), ...info }) }
   }
   return {
     ...s,
@@ -659,7 +674,7 @@ const FEED_TONE: Record<string, string> = { good: 'success', bad: 'error', warn:
 export function live(d: Pick<DeckData, 'feed' | 'agents' | 'running'>, w: number, rows: number, frame: number, now: number): Line[] {
   if (rows < 3) return []
   const out: Line[] = []
-  for (const a of (d.agents ?? []).filter(a => a.endedAt === undefined)) out.push([{ t: 'now'.padStart(AGE_W), c: 'claude' }, { t: ' │ ', c: 'subtle' }, { t: '⌁ ', c: 'claude', b: true }, { t: marquee(`${a.type ?? 'agent'} · ${a.task}`, Math.max(4, w - AGE_W - 6), frame, d.running), c: 'claude' }])
+  for (const a of (d.agents ?? []).filter(a => a.endedAt === undefined)) out.push([{ t: 'now'.padStart(AGE_W), c: 'claude' }, { t: ' │ ', c: 'subtle' }, { t: '⌁ ', c: 'claude', b: true }, { t: marquee(`${a.task || 'agent'}${agentTag(a.type) ? ' · ' + agentTag(a.type) : ''}`, Math.max(4, w - AGE_W - 6), frame, d.running), c: 'claude' }])
   for (const f of [...d.feed].reverse()) {
     const age = fmtDur(Math.max(0, now - f.at)).split(' ')[0]!
     const text = f.note ? `${f.text} ${f.note}` : f.text

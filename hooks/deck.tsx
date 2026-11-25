@@ -241,7 +241,7 @@ export async function deckTurnDone($: EngineInterface, e: { agentId?: string }) 
 }
 
 /** A sub agent's step: counted on its own card, never in the main-session totals (see applyStep). */
-async function agentStep($: EngineInterface, e: { agentId?: string; model: string }, u: StepUsage | undefined) {
+async function agentStep($: EngineInterface, e: { agentId?: string; model: string; effort?: unknown }, u: StepUsage | undefined) {
   const now = await $.clock.now()
   // ask the engine for its task until the card has one (the list may not hold a just-spawned agent yet)
   const known = ((await read($, state_)).agents ?? []).some(a => a.id === e.agentId && a.task)
