@@ -21,7 +21,7 @@ If no `superpowers:*` skills are in your skill list, add one line after it: "sup
 | `/helm:help` | This guide. |
 
 ## The deck
-The session's health beside the chat: the task, a drift meter (time for a fresh session?), context and 5h limit bars with the pace to the limit, tokens, cost, cache hits, the files this session touched, and a live feed of tool calls. It animates only while a turn runs.
+The session's health beside the chat: the task, a drift meter (time for a fresh session?), a skills section (the skill running now, a suggested next skill with why, the last three used), context and 5h limit bars with the pace to the limit, tokens, cost, cache hits, the files this session touched, and a live feed of tool calls. It animates only while a turn runs.
 
 Drift = 0.4 × context fill + 0.4 × topic shift (new terms vs. the task) + 0.2 × turns/60. At 0.70 it suggests a fresh session.
 

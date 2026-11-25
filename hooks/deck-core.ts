@@ -12,6 +12,8 @@ export type Line = Seg[]
 
 export type FeedItem = { at: number; kind: 'find' | 'read' | 'edit' | 'run' | 'test' | 'topic' | 'note'; text: string; note?: string; tone?: 'good' | 'bad' | 'warn' | 'dim' }
 
+export type DeckSkill = { name: string; at: number; via: 'tool' | 'command' }
+
 export type DeckData = {
   task?: string
   taskAt?: number
@@ -54,6 +56,10 @@ export type DeckData = {
   drift: Drift
   feed: FeedItem[]
   running: boolean
+  /** Skills used, newest last. */
+  skills?: DeckSkill[]
+  /** Time of the last prompt submit: a skill with at >= this is running while d.running. */
+  skillsSince?: number
   /** What the main session is doing now, for the task section's "now" row. */
   phase?: Phase
 }
@@ -62,6 +68,41 @@ export type Drift = { score: number; ctx: number; topic: number; turns: number }
 
 export const DRIFT_AT = 0.7
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+
+// ── skills ────────────────────────────────────────────────
+
+/** Add a used skill: an earlier entry of the same name goes, the last 4 are kept. */
+export function addSkill(list: DeckSkill[] | undefined, s: DeckSkill): DeckSkill[] {
+  return [...(list ?? []).filter(x => x.name !== s.name), s].slice(-4)
+}
+
+/** The skill a prompt like "/helm:prompt foo" runs. Plugin skills have a ':'; a bare name counts only when known. */
+export function skillCommand(text: string, known?: Iterable<string>): string | undefined {
+  const m = /^\s*\/([^\s/]+)/.exec(text)
+  if (!m) return undefined
+  const n = m[1]!
+  return n.includes(':') || (known && new Set(known).has(n)) ? n : undefined
+}
+
+/** A skill that fits what the session is doing now, or none. First matching rule wins; used skills are skipped. */
+export function suggestSkill(d: DeckData, now: number): { name: string; why: string } | undefined {
+  const t0 = d.taskAt ?? -Infinity
+  const latest = (k: FeedItem['kind']) => d.feed.filter(f => f.kind === k && f.at >= t0).reduce<FeedItem | undefined>((a, f) => (!a || f.at >= a.at ? f : a), undefined)
+  const test = latest('test'), edit = latest('edit')
+  const since = d.cur?.at ?? now - 600_000
+  const used = new Set((d.skills ?? []).filter(s => now - s.at < 600_000).map(s => s.name))
+  const run = d.skills?.at(-1)
+  if (run && d.running && run.at >= (d.skillsSince ?? Infinity)) used.add(run.name)
+  const cands: [boolean, string, string][] = [
+    [test?.tone === 'bad', 'superpowers:systematic-debugging', 'tests failing'],
+    [d.feed.filter(f => f.kind === 'run' && f.note === 'exit≠0' && f.at >= since && f.at >= t0).length >= 2, 'superpowers:systematic-debugging', 'commands failing'],
+    [!!edit && (!test || edit.at > test.at), 'superpowers:verification-before-completion', 'edited, not verified'],
+    [test?.tone === 'good' && (d.changes?.files ?? 0) > 0, 'helm:commit', 'checks pass, uncommitted'],
+    [!!d.task && !edit && !(d.skills ?? []).some(s => s.at >= t0), 'superpowers:brainstorming', 'new task, no plan yet'],
+  ]
+  for (const [ok, name, why] of cands) if (ok && !used.has(name)) return { name, why }
+  return undefined
+}
 
 // ── numbers ───────────────────────────────────────────────
 
@@ -479,6 +520,19 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
     ...focusNote(d, w),
     ...(hi ? [[{ t: narrow ? '→ start fresh' : '→ start a fresh session  ·  /helm:prompt to start the next task', c: 'error', b: true }]] : []),
   ])
+
+  // skills: the one running, a suggestion, then the last used
+  {
+    const sk = d.skills ?? []
+    const newest = sk.at(-1)
+    const running = !!newest && d.running && newest.at >= (d.skillsSince ?? Infinity)
+    const sug = suggestSkill(d, now)
+    const rows: Line[] = []
+    if (running) rows.push([{ t: '▸ ', c: 'claude' }, { t: newest!.name, c: 'claude', b: true }])
+    if (sug) rows.push([{ t: '→ ', c: 'suggestion' }, { t: sug.name, c: 'suggestion', b: true }, { t: ' · ' + sug.why, d: true }])
+    for (const s of sk.slice(0, running ? -1 : undefined).slice(-3).reverse()) rows.push([{ t: `${s.name} · ${fmtDur(Math.max(0, now - s.at))}`, d: true }])
+    if (rows.length) sec('skills', '✦ SKILLS', running ? 'claude' : 'suggestion', rows)
+  }
 
   // usage: context, the 5h meter and its chart, the week meter, then cost and tokens
   const body: Line[] = []

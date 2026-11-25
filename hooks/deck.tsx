@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import { DRIFT_AT, PANE_FRAME_MS, PIPE_ROWS, TEST_RE, addCtx, addFive, keepLimits, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, layout, live, pipeline, terms, tokenSplit, toolPhase, topicShift, verdict } from './deck-core'
+import { DRIFT_AT, PANE_FRAME_MS, PIPE_ROWS, TEST_RE, addCtx, addFive, addSkill, skillCommand, keepLimits, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, layout, live, pipeline, terms, tokenSplit, toolPhase, topicShift, verdict } from './deck-core'
 import type { DeckData, FeedItem, Phase, StepUsage } from './deck-core'
 import type { DeckDone, DeckState } from '../types'
 import { readLevel } from './lean'
@@ -204,8 +204,13 @@ export async function deckPrompt($: EngineInterface, e: { text: string; isMeta?:
     // the next turn's receipt names what was asked: the first line, commands included
     const ask = e.text.trim().split('\n')[0]!.replace(/\s+/g, ' ').slice(0, 60)
     await set($, s => ({ ...s, ask }))
-    if (e.command || e.text.trim().startsWith('/')) return
     const now = await $.clock.now()
+    const cmd = e.text.trim()
+    await set($, s => {
+      const name = skillCommand(cmd, (s.skills ?? []).map(k => k.name))
+      return { ...s, skillsSince: now, ...(name ? { skills: addSkill(s.skills, { name, at: now, via: 'command' }) } : {}) }
+    })
+    if (e.command || cmd.startsWith('/')) return
     const t = [...terms(e.text)]
     await set($, s => {
       if (!s.task) return { ...s, task: e.text.trim().split('\n')[0]!.slice(0, 80), taskAt: now, taskTerms: t, recent: [] }
@@ -282,6 +287,7 @@ export async function deckTool($: EngineInterface, e: { tool: string; agentId?: 
     const a = e as unknown as Record<string, unknown>
     const input = (a.input ?? a) as Record<string, unknown>
     const err = !!(r as { isError?: boolean }).isError
+    if (e.tool === 'Skill' && typeof input.skill === 'string' && input.skill) await set($, s => ({ ...s, skills: addSkill(s.skills, { name: String(input.skill), at: now, via: 'tool' }) }))
     const base = (p: unknown) => String(p ?? '').split('/').slice(-2).join('/')
     let f: Omit<FeedItem, 'at'> | undefined
     const tool = e.tool
@@ -372,7 +378,7 @@ export async function deckTask($: EngineInterface, text: string): Promise<string
 }
 
 export async function deckReset($: EngineInterface): Promise<string> {
-  await set($, s => ({ ...blank(), ctx: s.ctx, limits: s.limits, fiveSeries: s.fiveSeries, fiveAt: s.fiveAt, cost: s.cost, startedAt: s.startedAt }))
+  await set($, s => ({ ...blank(), ctx: s.ctx, limits: s.limits, fiveSeries: s.fiveSeries, fiveAt: s.fiveAt, skills: s.skills, skillsSince: s.skillsSince, cost: s.cost, startedAt: s.startedAt }))
   return 'Deck reset.'
 }
 

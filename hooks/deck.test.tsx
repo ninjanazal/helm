@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { keepLimits, FIVE_CHART_MIN, FIVE_CHART_SPREAD, fmtDur, addCtx, addFive, agentDone, agentStep, agentTag, applyStep, applyTodo, bar, brailleLine, isDeckOn, deck, pipeline, toolPhase, live, marquee, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
+import { addSkill, skillCommand, suggestSkill, keepLimits, FIVE_CHART_MIN, FIVE_CHART_SPREAD, fmtDur, addCtx, addFive, agentDone, agentStep, agentTag, applyStep, applyTodo, bar, brailleLine, isDeckOn, deck, pipeline, toolPhase, live, marquee, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
 import type { DeckData, FiveSample } from './deck-core'
 
 const data = (x: Partial<DeckData> = {}): DeckData => ({
@@ -539,4 +539,67 @@ test('usage: the 5h meter shows at narrow and wide widths, with and without a ch
     const r = deck(data({ limits: lim, fiveSeries: fs }), w, 0, 3.6e6).find(s => s.id === 'usage')!.body.map(l => l.map(s => s.t).join(''))
     expect(r.some(x => x.startsWith('5h') && /[▰▱]/.test(x))).toBe(true)
   }
+})
+
+const sg = (x: Partial<DeckData> = {}) => data({ task: undefined, changes: undefined, feed: [], running: false, ...x })
+const NOW = 3.6e6
+const T = (at: number, tone: 'good' | 'bad') => ({ at, kind: 'test' as const, text: 'test', note: tone === 'bad' ? 'failed' : 'passed', tone })
+const E = (at: number) => ({ at, kind: 'edit' as const, text: 'a.ts' })
+const R = (at: number) => ({ at, kind: 'run' as const, text: 'x', note: 'exit≠0', tone: 'bad' as const })
+
+test('suggestSkill: rules a-d, priority, used skills skipped', () => {
+  expect(suggestSkill(sg({ feed: [T(1, 'bad')] }), NOW)).toEqual({ name: 'superpowers:systematic-debugging', why: 'tests failing' })
+  expect(suggestSkill(sg({ feed: [R(NOW - 5), R(NOW - 4)] }), NOW)?.why).toBe('commands failing')
+  expect(suggestSkill(sg({ feed: [R(NOW - 5)] }), NOW)).toBeUndefined()
+  expect(suggestSkill(sg({ feed: [E(5), T(3, 'good')] }), NOW)).toEqual({ name: 'superpowers:verification-before-completion', why: 'edited, not verified' })
+  expect(suggestSkill(sg({ feed: [E(5)] }), NOW)?.why).toBe('edited, not verified')
+  expect(suggestSkill(sg({ feed: [E(1), T(3, 'good')], changes: { files: 2, added: 1, removed: 0 } }), NOW)).toEqual({ name: 'helm:commit', why: 'checks pass, uncommitted' })
+  expect(suggestSkill(sg({ task: 'x' }), NOW)).toEqual({ name: 'superpowers:brainstorming', why: 'new task, no plan yet' })
+  expect(suggestSkill(sg({ task: 'x', skills: [{ name: 'helm:prompt', at: 0, via: 'tool' }] }), NOW)).toBeUndefined()
+  // a and b both match: a wins
+  expect(suggestSkill(sg({ feed: [T(1, 'bad'), E(5)] }), NOW)?.why).toBe('tests failing')
+  // recently used or running: skipped, falls through to b
+  const dbg = { name: 'superpowers:systematic-debugging', at: NOW - 1000, via: 'tool' as const }
+  expect(suggestSkill(sg({ feed: [T(1, 'bad'), E(5)], skills: [dbg] }), NOW)?.why).toBe('edited, not verified')
+  expect(suggestSkill(sg({ feed: [T(1, 'bad')], skills: [{ ...dbg, at: 0 }] }), NOW)?.why).toBe('tests failing')
+  expect(suggestSkill(sg({ feed: [T(1, 'bad')], skills: [{ ...dbg, at: 100 }], running: true, skillsSince: 50 }), NOW)).toBeUndefined()
+})
+
+test('skills: command names and the history list', () => {
+  expect(skillCommand('/helm:prompt x')).toBe('helm:prompt')
+  expect(skillCommand('/clear')).toBeUndefined()
+  expect(skillCommand('/brainstorm', ['brainstorm'])).toBe('brainstorm')
+  const l = [1, 2, 3, 4].map(i => ({ name: `s${i}`, at: i, via: 'tool' as const }))
+  expect(addSkill(l, { name: 's2', at: 9, via: 'command' }).map(s => s.name)).toEqual(['s1', 's3', 's4', 's2'])
+  expect(addSkill(l, { name: 's5', at: 9, via: 'tool' }).map(s => s.name)).toEqual(['s2', 's3', 's4', 's5'])
+})
+
+test('deck: skills section sits between focus and usage and fits', () => {
+  for (const w of [32, 60]) {
+    const on = deck(data({ running: true, skillsSince: 10, skills: [{ name: 'superpowers:verification-before-completion', at: 5, via: 'tool' }, { name: 'superpowers:systematic-debugging', at: 20, via: 'tool' }] }), w, 0, NOW)
+    const ids = on.map(x => x.id)
+    expect(ids.indexOf('skills')).toBe(ids.indexOf('focus') + 1)
+    expect(ids.indexOf('usage')).toBe(ids.indexOf('skills') + 1)
+    const sk = on.find(x => x.id === 'skills')!
+    expect(sk.tone).toBe('claude')
+    expect(sk.body[0]!.map(s => s.t).join('')).toContain('▸ superpowers:systematic-debugg')
+    for (const l of sk.body) expect(len(l)).toBeLessThanOrEqual(w)
+  }
+  expect(deck(sg(), 46, 0, NOW).some(x => x.id === 'skills')).toBe(false)
+})
+
+test('suggestSkill: a skill used before taskAt does not stop brainstorming', () => {
+  const old = { name: 'superpowers:brainstorming', at: 50, via: 'tool' as const }
+  expect(suggestSkill(sg({ task: 'x', taskAt: 100, skills: [old] }), NOW)?.name).toBe('superpowers:brainstorming')
+})
+
+test('suggestSkill: a failing test from before taskAt does not trigger debugging', () => {
+  expect(suggestSkill(sg({ feed: [T(1, 'bad')], taskAt: 100 }), NOW)).toBeUndefined()
+})
+
+test('deck: with skills, usage and agents sections still show at w=60', () => {
+  const ids = deck(data({ skills: [{ name: 'helm:prompt', at: 5, via: 'tool' }], agents: [agent('a')] }), 60, 0, NOW).map(x => x.id)
+  expect(ids).toContain('usage')
+  expect(ids).toContain('agents')
+  expect(ids).toContain('skills')
 })

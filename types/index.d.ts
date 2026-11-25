@@ -11,6 +11,9 @@ export type DeckCheck = { text: string; state: 'todo' | 'working' | 'done' }
 /** One item of Claude's task list; `id` is the task tool's id, when it has one. */
 export type DeckTodo = DeckCheck & { id?: string }
 
+/** A skill the session used: by the Skill tool, or by a slash command. */
+export type DeckSkill = { name: string; at: number; via: 'tool' | 'command' }
+
 export type DeckState = {
   task?: string
   taskAt?: number
@@ -50,6 +53,10 @@ export type DeckState = {
   ctxSeries?: number[]
   /** The 5h usage, a sample a minute, reset with its window. */
   fiveSeries?: { at: number; pct: number }[]
+  /** Skills used, newest last. */
+  skills?: DeckSkill[]
+  /** Time of the last prompt submit. */
+  skillsSince?: number
   /** The current 5h window's reset time, ms. */
   fiveAt?: number
   /** The prompt that starts the next turn, first line. */
