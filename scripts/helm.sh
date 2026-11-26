@@ -2,13 +2,15 @@
 # helm setup script: the make targets call this. Asks where and what when a person is there to answer.
 #   sh scripts/helm.sh help|setup|remove|status|check|bench
 #   non-interactive (used by the old make names): install|uninstall <piece>, update, enable, disable, test, validate
-# Presets, all optional: SCOPE=local|user  PROJECT=<dir>  FROM=here|github  PIECES="helm superpowers"  HELM_YES=1
+# Presets, all optional: SCOPE=local|user  PROJECT=<dir>  FROM=here|github  PIECES="helm superpowers mattpocock adhd"  HELM_YES=1
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PLUGIN=helm MARKETPLACE=helm GITHUB=ninjanazal/helm
 ID=$PLUGIN@$MARKETPLACE
 SP=superpowers@claude-plugins-official
-ALL="helm superpowers"
+MP=mattpocock-skills@claude-plugins-official
+AD=i-have-adhd@i-have-adhd AD_MKT=ayghri/i-have-adhd
+ALL="helm superpowers mattpocock"
 
 if [ -t 1 ] && [ -z "$NO_COLOR" ]; then
   B=$(printf '\033[1m') D=$(printf '\033[2m') R=$(printf '\033[0m') G=$(printf '\033[32m')
@@ -44,11 +46,15 @@ at_scope() { case " $(plugin_scopes "$1") " in *" $SCOPE "*) return 0;; esac; re
 piece_state() {
   case $1 in
     helm) at_scope "$ID" && say "installed ($SCOPE) → update" || say 'not installed' ;;
-    superpowers) at_scope "$SP" && say "installed ($SCOPE)" || say 'not installed' ;;
+    *) at_scope "$(piece_id $1)" && say "installed ($SCOPE)" || say 'not installed' ;;
   esac
 }
+# piece_id <piece>: the plugin id for a piece.
+piece_id() {
+  case $1 in helm) say "$ID";; superpowers) say "$SP";; mattpocock) say "$MP";; adhd) say "$AD";; esac
+}
 piece_label() {
-  case $1 in helm) say 'helm plugin';; superpowers) say superpowers;; esac
+  case $1 in helm) say 'helm plugin';; superpowers) say superpowers;; mattpocock) say 'Matt Pocock skills';; adhd) say i-have-adhd;; esac
 }
 
 # ask_scope: sets SCOPE unless preset or nobody to ask.
@@ -92,18 +98,24 @@ install_helm() {
     claude plugin install "$PLUGIN" --marketplace "$(source_)" --scope "$SCOPE" && done_ "helm installed ($SCOPE)"
   fi
 }
-install_superpowers() {
+# install_plugin <id> <label>: install a plugin at SCOPE unless it is already there.
+install_plugin() { need_claude; if at_scope "$1"; then done_ "$2 already installed ($SCOPE)"; else claude plugin install "$1" --scope "$SCOPE" && done_ "$2 installed ($SCOPE)"; fi; }
+# uninstall_plugin <id> <label>: remove a plugin from SCOPE.
+uninstall_plugin() { has_claude && claude plugin uninstall "$1" --scope "$SCOPE" >/dev/null 2>&1 && done_ "$2 removed ($SCOPE)" || miss "$2 not installed at $SCOPE scope"; }
+install_superpowers() { install_plugin "$SP" superpowers; }
+install_mattpocock() { install_plugin "$MP" 'Matt Pocock skills'; }
+install_adhd() {
   need_claude
-  if at_scope "$SP"; then done_ "superpowers already installed ($SCOPE)"
-  else claude plugin install "$SP" --scope "$SCOPE" && done_ "superpowers installed ($SCOPE)"; fi
+  if at_scope "$AD"; then install_plugin "$AD" i-have-adhd
+  else claude plugin marketplace add "$AD_MKT" >/dev/null 2>&1; install_plugin "$AD" i-have-adhd; fi
 }
 
 uninstall_helm() {
   has_claude && claude plugin uninstall "$ID" --scope "$SCOPE" >/dev/null 2>&1 && done_ "helm removed ($SCOPE)" || miss "helm not installed at $SCOPE scope"
 }
-uninstall_superpowers() {
-  has_claude && claude plugin uninstall "$SP" --scope "$SCOPE" >/dev/null 2>&1 && done_ "superpowers removed ($SCOPE)" || miss "superpowers not installed at $SCOPE scope"
-}
+uninstall_superpowers() { uninstall_plugin "$SP" superpowers; }
+uninstall_mattpocock() { uninstall_plugin "$MP" 'Matt Pocock skills'; }
+uninstall_adhd() { uninstall_plugin "$AD" i-have-adhd; }
 
 # helm already installed: update it; otherwise install it.
 helm_action() { if at_scope "$ID"; then cmd_update; else install_helm; fi; }
@@ -160,7 +172,7 @@ row_miss() { printf '  %s○%s %-36s %s%s%s\n' "$Y" "$R" "$1" "$D" "$2" "$R"; }
 cmd_status() {
   printf '\n  %shelm status%s\n\n' "$B" "$R"
   has_claude || row_miss claude 'not found: install Claude Code'
-  for p in "$ID" "$SP"; do
+  for p in "$ID" "$SP" "$MP" "$AD"; do
     s=$(plugin_scopes "$p"); [ -n "$s" ] && row_ok "$p" "$s" || row_miss "$p" 'not installed · make setup'
   done
   say ''
@@ -193,7 +205,8 @@ cmd_help() {
   [ -t 1 ] && [ -z "$NO_COLOR" ] && [ -n "$TERM" ] && printf '\033[H\033[2J'
   version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$ROOT/.claude-plugin/plugin.json" | head -1)
   printf '\n  %s⎈ %shelm%s %sv%s · Claude Code plugin%s\n\n' "$M" "$B" "$R" "$D" "$version" "$R"
-  printf '    %smake setup%s    install / update or remove helm and superpowers %s(asks where, then what)%s\n' "$C" "$R" "$D" "$R"
+  printf '    %smake setup%s    install / update or remove helm, superpowers and Matt Pocock skills %s(asks where, then what)%s\n' "$C" "$R" "$D" "$R"
+  printf '    %smake setup PIECES=adhd%s   also add i-have-adhd %s(optional)%s\n' "$C" "$R" "$D" "$R"
   printf '    %smake remove%s   uninstall pieces %s(asks where and what, then confirms)%s\n' "$C" "$R" "$D" "$R"
   printf '    %smake status%s   what is installed, and where\n' "$C" "$R"
   printf '    %smake check%s    validate the plugin and run the tests\n' "$C" "$R"
@@ -207,7 +220,7 @@ use_project
 case $verb in
   help|setup|remove|status|check|bench|update|enable|disable|test|validate) "cmd_$verb" ;;
   install|uninstall)
-    case $1 in helm|superpowers) ;; *) die "usage: make help  (unknown piece: $1)";; esac
+    case $1 in helm|superpowers|mattpocock|adhd) ;; *) die "usage: make help  (unknown piece: $1)";; esac
     SCOPE=${SCOPE:-local}; "${verb}_$1" ;;
   *) die "unknown: $verb · usage: make help" ;;
 esac

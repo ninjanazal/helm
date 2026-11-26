@@ -7,6 +7,7 @@ import { readLevel } from './lean'
 import { readMode } from './workload'
 import { readLevel as readTesting } from './testing'
 import { readAdvisor, readAdvisorModel } from './advisor'
+import { trackerFor } from './pipeline'
 
 /**
  * The deck pane: the session's health beside the chat. Every figure comes from the engine (session.measure,
@@ -20,6 +21,8 @@ const state_ = atom({ plugin: 'helm', key: 'deck' } as const, blank(), { shape: 
 const frame = atom({ plugin: 'helm', key: 'deckFrame' } as const, 0)
 
 let running = false
+/** Repo set up by /setup-matt-pocock-skills; refreshed at session start and on each prompt. */
+let tracker = false
 /** What the main session is doing, for the pipeline; waiting is read at draw time from the pane's props. */
 let phase: Phase = { kind: 'idle' }
 let tickGen = 0
@@ -99,6 +102,7 @@ function view(s: DeckState): DeckData {
     limits: s.limits ?? [],
     drift: drift(pct, topicShift(new Set(s.taskTerms), recent), s.turns),
     running,
+    tracker,
   }
 }
 
@@ -161,6 +165,7 @@ export async function deckStart($: EngineInterface) {
   let stored: unknown
   await quiet(async () => { stored = await $.store.get(await onKey($)) })
   deckIsOn = isDeckOn(stored)
+  await quiet(async () => { tracker = await trackerFor($) })
   // /clear and /new fire session.start again: only the newest registration's timers do work.
   const gen = ++tickGen
   $.clock.every(PANE_FRAME_MS, () => void (gen === tickGen && deckIsOn && running && quiet(() => update($, frame, f => f + 1))))
@@ -199,6 +204,7 @@ export function deckCleared($: EngineInterface) {
 
 export async function deckPrompt($: EngineInterface, e: { text: string; isMeta?: true; command?: unknown }) {
   if (reopenPending) deckOpen($)
+  await quiet(async () => { tracker = await trackerFor($) })
   await quiet(async () => {
     if (e.isMeta) return
     // the next turn's receipt names what was asked: the first line, commands included

@@ -547,19 +547,35 @@ const T = (at: number, tone: 'good' | 'bad') => ({ at, kind: 'test' as const, te
 const E = (at: number) => ({ at, kind: 'edit' as const, text: 'a.ts' })
 const R = (at: number) => ({ at, kind: 'run' as const, text: 'x', note: 'exit≠0', tone: 'bad' as const })
 
-test('suggestSkill: rules a-d, priority, used skills skipped', () => {
-  expect(suggestSkill(sg({ feed: [T(1, 'bad')] }), NOW)).toEqual({ name: 'superpowers:systematic-debugging', why: 'tests failing' })
-  expect(suggestSkill(sg({ feed: [R(NOW - 5), R(NOW - 4)] }), NOW)?.why).toBe('commands failing')
+test('suggestSkill: rules a-f, priority, used skills skipped', () => {
+  const DB = 'mattpocock-skills:diagnosing-bugs'
+  const ch = { files: 2, added: 1, removed: 0 }
+  const sk = (name: string, at: number) => ({ name, at, via: 'tool' as const })
+  expect(suggestSkill(sg({ feed: [T(1, 'bad')] }), NOW)).toEqual({ name: DB, why: 'tests failing' })
+  expect(suggestSkill(sg({ feed: [R(NOW - 5), R(NOW - 4)] }), NOW)).toEqual({ name: DB, why: 'commands failing' })
   expect(suggestSkill(sg({ feed: [R(NOW - 5)] }), NOW)).toBeUndefined()
   expect(suggestSkill(sg({ feed: [E(5), T(3, 'good')] }), NOW)).toEqual({ name: 'superpowers:verification-before-completion', why: 'edited, not verified' })
   expect(suggestSkill(sg({ feed: [E(5)] }), NOW)?.why).toBe('edited, not verified')
-  expect(suggestSkill(sg({ feed: [E(1), T(3, 'good')], changes: { files: 2, added: 1, removed: 0 } }), NOW)).toEqual({ name: 'helm:commit', why: 'checks pass, uncommitted' })
-  expect(suggestSkill(sg({ task: 'x' }), NOW)).toEqual({ name: 'superpowers:brainstorming', why: 'new task, no plan yet' })
+  // c: pass + uncommitted, unreviewed; d: reviewed after the edit
+  const pc = sg({ feed: [E(1), T(3, 'good')], changes: ch })
+  expect(suggestSkill(pc, NOW)).toEqual({ name: 'mattpocock-skills:code-review', why: 'checks pass, unreviewed' })
+  expect(suggestSkill({ ...pc, skills: [sk('mattpocock-skills:code-review', 0)] }, NOW)?.name).toBe('mattpocock-skills:code-review')
+  expect(suggestSkill({ ...pc, skills: [sk('mattpocock-skills:code-review', NOW - 1000)] }, NOW)).toEqual({ name: 'helm:commit', why: 'checks pass, uncommitted' })
+  // e: grilled with a tracker -> to-spec; without one, nothing (f needs no skill used)
+  const g = sg({ task: 'x', tracker: true, skills: [sk('mattpocock-skills:grilling', 10)] })
+  expect(suggestSkill(g, NOW)).toEqual({ name: 'mattpocock-skills:to-spec', why: 'grilled, no spec yet' })
+  expect(suggestSkill({ ...g, tracker: false }, NOW)).toBeUndefined()
+  expect(suggestSkill({ ...g, skills: [sk('mattpocock-skills:grill-me', 10)] }, NOW)?.name).toBe('mattpocock-skills:to-spec')
+  // to-spec ran after t0 (outside the used window): not suggested again
+  expect(suggestSkill({ ...g, skills: [...g.skills, sk('mattpocock-skills:to-spec', 20)] }, NOW)).toBeUndefined()
+  // f
+  expect(suggestSkill(sg({ task: 'x' }), NOW)).toEqual({ name: 'mattpocock-skills:grill-me', why: 'new task, not grilled' })
   expect(suggestSkill(sg({ task: 'x', skills: [{ name: 'helm:prompt', at: 0, via: 'tool' }] }), NOW)).toBeUndefined()
-  // a and b both match: a wins
+  // priority: failing test beats a new task and an edit
+  expect(suggestSkill(sg({ task: 'x', feed: [T(1, 'bad')] }), NOW)?.name).toBe(DB)
   expect(suggestSkill(sg({ feed: [T(1, 'bad'), E(5)] }), NOW)?.why).toBe('tests failing')
   // recently used or running: skipped, falls through to b
-  const dbg = { name: 'superpowers:systematic-debugging', at: NOW - 1000, via: 'tool' as const }
+  const dbg = { name: DB, at: NOW - 1000, via: 'tool' as const }
   expect(suggestSkill(sg({ feed: [T(1, 'bad'), E(5)], skills: [dbg] }), NOW)?.why).toBe('edited, not verified')
   expect(suggestSkill(sg({ feed: [T(1, 'bad')], skills: [{ ...dbg, at: 0 }] }), NOW)?.why).toBe('tests failing')
   expect(suggestSkill(sg({ feed: [T(1, 'bad')], skills: [{ ...dbg, at: 100 }], running: true, skillsSince: 50 }), NOW)).toBeUndefined()
@@ -588,9 +604,9 @@ test('deck: skills section sits between focus and usage and fits', () => {
   expect(deck(sg(), 46, 0, NOW).some(x => x.id === 'skills')).toBe(false)
 })
 
-test('suggestSkill: a skill used before taskAt does not stop brainstorming', () => {
-  const old = { name: 'superpowers:brainstorming', at: 50, via: 'tool' as const }
-  expect(suggestSkill(sg({ task: 'x', taskAt: 100, skills: [old] }), NOW)?.name).toBe('superpowers:brainstorming')
+test('suggestSkill: a skill used before taskAt does not stop grill-me', () => {
+  const old = { name: 'helm:prompt', at: 50, via: 'tool' as const }
+  expect(suggestSkill(sg({ task: 'x', taskAt: 100, skills: [old] }), NOW)?.name).toBe('mattpocock-skills:grill-me')
 })
 
 test('suggestSkill: a failing test from before taskAt does not trigger debugging', () => {

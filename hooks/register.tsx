@@ -3,8 +3,11 @@ import type { Register } from 'claude-code'
 import { leanText, readLevel, LEAN_ID } from './lean'
 import { WORKLOAD_ID, workloadSection } from './workload'
 import { ADVISOR_ID, advisorSection } from './advisor'
+import { PIPELINE_ID, pipelineSection } from './pipeline'
 import { TESTING_ID, testingSection } from './testing'
 import { handleHelmTool, registerHelmTools, toolArgs } from './tools'
+
+const HELM_SECTIONS = new Set([LEAN_ID, WORKLOAD_ID, TESTING_ID, ADVISOR_ID, PIPELINE_ID])
 
 /**
  * helm's event wiring. The engine allows one unmatched hook per event per plugin, so the deck's handlers are
@@ -42,11 +45,13 @@ export const register: Register = (on, options) => {
     const workload = await workloadSection($)
     const testing = await testingSection($)
     const advisor = await advisorSection($)
-    const sections = r.sections.filter(s => s.id !== LEAN_ID && s.id !== WORKLOAD_ID && s.id !== TESTING_ID && s.id !== ADVISOR_ID)
+    const pipeline = await pipelineSection($)
+    const sections = r.sections.filter(s => !HELM_SECTIONS.has(s.id))
     if (lean) sections.push({ id: LEAN_ID, text: lean, scope: 'session' as const })
     if (workload) sections.push({ id: WORKLOAD_ID, text: workload, scope: 'session' as const })
     sections.push({ id: TESTING_ID, text: testing, scope: 'session' as const })
     sections.push({ id: ADVISOR_ID, text: advisor, scope: 'session' as const })
+    sections.push({ id: PIPELINE_ID, text: pipeline, scope: 'session' as const })
     return { sections }
   }).catch(($, e, next) => next(e))
 

@@ -120,7 +120,6 @@ Show the prompt in one fenced block, then one line: "Approve it, edit it, or cha
 
 ## 6. Save it and stop
 On approval call `mcp__helm__set_task` with `{ "prompt": "<the approved prompt, whole>", "goal": "<the goal in one line>" }`.
-Then stop and say, in one line, that it is saved and that "go" starts it here: if superpowers is installed,
-brainstorming then writing-plans first (otherwise straight from the prompt, as the contract), finishing with
+Then stop and say, in one line, that it is saved and that "go" starts it here: following the helm pipeline: grilling (mattpocock-skills) then writing-plans, or /mattpocock-skills:to-spec and to-tickets when the repo's tracker is set up (otherwise straight from the prompt, as the contract), finishing with
 the `<output>` report checked against `<acceptance>`. If the prompt has a `<split>`, "go" dispatches its units
 to sub agents (parallel where independent) instead of doing them in the host.

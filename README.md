@@ -10,12 +10,13 @@ helm is a Claude Code plugin:
 - **Testing:** `/helm:testing` sets how much testing the host writes and runs: `off` (none unless asked), `light` (default, only for risky logic) or `thorough` (test-first, edge cases, a regression test per bug, the full suite). Like lean, it applies from the next session, `/clear` or compaction, and a project can pin it in `.claude/helm/testing`.
 - **Workload:** `/helm:workload` sets how much work the host hands to cheaper sub agents: `off` never does, `sometimes` (default) hands a unit to a cheaper model or lower effort only where it is clearly cheaper and can be briefed exactly, and `always` hands every unit (implementation, exploration, tests, docs) to a cheaper model or effort than the host (haiku < sonnet < opus, never above the host, always cheaper) while the host plans, reviews and verifies. In both non-off modes the plan lists model and effort per unit and you approve it before dispatch. The deck's chip shows the measured share, e.g. `25% delegated`. It applies from the next session, `/clear` or compaction, and pins in `.claude/helm/workload`.
 - **Advisor:** `/helm:advisor` sets how often the model consults the built-in advisor, with planning as the main trigger: `low` (also on the drafted plan), `mid` (default, plus plan changes and before done) or `high` (plus before planning starts and on every revision). Guidance only. It applies the same way and pins in `.claude/helm/advisor`. The task bar also shows the advisor's model (Claude Code's `advisorModel` setting) and warns when it is weaker than the session model.
-- **superpowers** (workflow skills) is installed with helm as a plugin dependency; helm's prompt and commit skills route to it and work without it.
+- **Dependencies:** superpowers and mattpocock-skills (workflow skills) install with helm as plugin dependencies; helm's prompt and commit skills route to them and work without them.
+- **Pipeline:** a system-prompt section routes each stage to a skill: design to `mattpocock-skills:grilling`, plan to `superpowers:writing-plans` (or `/mattpocock-skills:to-spec` and `to-tickets`), build to `superpowers:subagent-driven-development` with `mattpocock-skills:tdd`, bugs to `mattpocock-skills:diagnosing-bugs`, review to `mattpocock-skills:code-review`, ship to `helm:commit` then `mattpocock-skills:pr`. Optional piece: `i-have-adhd`, via `make setup PIECES=adhd`.
 
 ## 📦 Install
 
 ```
-make setup     # asks: this project or every project, and which pieces (helm, superpowers)
+make setup     # asks: this project or every project, and which pieces (helm, superpowers, Matt Pocock skills; adhd optional)
 make remove    # asks the same, confirms, then uninstalls
 make status    # what is installed, and where
 ```

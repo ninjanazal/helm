@@ -16,16 +16,22 @@ reset() { : > "$T/calls"; : > "$T/out"; }
 run()  { reset; HELM_INTERACTIVE=1 sh scripts/helm.sh "$@" > "$T/out" 2>&1; }
 
 printf '1\n\n' | run setup
-has "$T/calls" 'plugin install helm --marketplace' && has "$T/calls" 'superpowers@claude-plugins-official --scope local' \
-  && ! has "$T/calls" 'mcp add' && ok 'setup: defaults install every piece locally' || bad 'setup: defaults install every piece locally'
+has "$T/calls" 'plugin install helm --marketplace' && has "$T/calls" 'superpowers@claude-plugins-official --scope local' && has "$T/calls" 'mattpocock-skills@claude-plugins-official --scope local' \
+  && ! has "$T/calls" 'mcp add' && ! has "$T/calls" 'i-have-adhd' && ok 'setup: defaults install every piece locally' || bad 'setup: defaults install every piece locally'
 
 printf '2\n\n' | run setup
-has "$T/calls" 'superpowers@claude-plugins-official --scope user' && has "$T/calls" 'install helm --marketplace .* --scope user' \
+has "$T/calls" 'superpowers@claude-plugins-official --scope user' && has "$T/calls" 'mattpocock-skills@claude-plugins-official --scope user' \
+  && has "$T/calls" 'install helm --marketplace .* --scope user' \
   && ok 'setup: every project installs everything there' || bad 'setup: every project installs everything there'
 
 printf '1\n\n2\ny\n' | run setup
-has "$T/calls" 'plugin uninstall helm@helm --scope local' && has "$T/calls" 'uninstall superpowers' && ! has "$T/calls" 'plugin install' \
+has "$T/calls" 'plugin uninstall helm@helm --scope local' && has "$T/calls" 'uninstall superpowers' && has "$T/calls" 'uninstall mattpocock-skills' && ! has "$T/calls" 'plugin install' \
   && ok 'setup: remove choice removes after confirm' || bad 'setup: remove choice removes after confirm'
+
+reset; PIECES=adhd sh scripts/helm.sh setup < /dev/null > "$T/out" 2>&1
+m=$(grep -n 'plugin marketplace add ayghri/i-have-adhd' "$T/calls" | head -1 | cut -d: -f1)
+i=$(grep -n 'plugin install i-have-adhd@i-have-adhd --scope local' "$T/calls" | head -1 | cut -d: -f1)
+[ -n "$m" ] && [ -n "$i" ] && [ "$m" -lt "$i" ] && ok 'setup: adhd adds its marketplace then installs' || bad 'setup: adhd adds its marketplace then installs'
 
 printf '1\n\n2\nn\n' | run setup
 ! has "$T/calls" uninstall && ok 'setup: remove declined removes nothing' || bad 'setup: remove declined removes nothing'

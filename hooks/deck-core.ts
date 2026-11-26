@@ -4,6 +4,7 @@
  * runs the spinner turns and a light sweeps the rule of the sections where work flows; idle, nothing moves.
  */
 
+import { SKILL } from './pipeline'
 import type { DeckAgent, DeckCheck, DeckTodo } from '../types'
 
 /** A run of text: `c` its colour, `bg` a fill (the text then draws in `inverseText`), `b` bold, `d` dim. Theme names only. */
@@ -62,6 +63,8 @@ export type DeckData = {
   skillsSince?: number
   /** What the main session is doing now, for the task section's "now" row. */
   phase?: Phase
+  /** Repo set up by /setup-matt-pocock-skills. */
+  tracker?: boolean
 }
 
 export type Drift = { score: number; ctx: number; topic: number; turns: number }
@@ -93,12 +96,17 @@ export function suggestSkill(d: DeckData, now: number): { name: string; why: str
   const used = new Set((d.skills ?? []).filter(s => now - s.at < 600_000).map(s => s.name))
   const run = d.skills?.at(-1)
   if (run && d.running && run.at >= (d.skillsSince ?? Infinity)) used.add(run.name)
+  const reviewed = d.skills?.some(s => s.name === SKILL.review && s.at > (edit?.at ?? t0))
+  const checksPass = test?.tone === 'good' && (d.changes?.files ?? 0) > 0
+  const grilledSinceTask = (d.skills ?? []).some(s => [SKILL.grilling, SKILL.grillMe].includes(s.name) && s.at >= t0)
   const cands: [boolean, string, string][] = [
-    [test?.tone === 'bad', 'superpowers:systematic-debugging', 'tests failing'],
-    [d.feed.filter(f => f.kind === 'run' && f.note === 'exit≠0' && f.at >= since && f.at >= t0).length >= 2, 'superpowers:systematic-debugging', 'commands failing'],
-    [!!edit && (!test || edit.at > test.at), 'superpowers:verification-before-completion', 'edited, not verified'],
-    [test?.tone === 'good' && (d.changes?.files ?? 0) > 0, 'helm:commit', 'checks pass, uncommitted'],
-    [!!d.task && !edit && !(d.skills ?? []).some(s => s.at >= t0), 'superpowers:brainstorming', 'new task, no plan yet'],
+    [test?.tone === 'bad', SKILL.diagnose, 'tests failing'],
+    [d.feed.filter(f => f.kind === 'run' && f.note === 'exit≠0' && f.at >= since && f.at >= t0).length >= 2, SKILL.diagnose, 'commands failing'],
+    [!!edit && (!test || edit.at > test.at), SKILL.verify, 'edited, not verified'],
+    [checksPass && !reviewed, SKILL.review, 'checks pass, unreviewed'],
+    [checksPass && !!reviewed, SKILL.commit, 'checks pass, uncommitted'],
+    [!!d.tracker && grilledSinceTask && !edit && !(d.skills ?? []).some(s => s.name === SKILL.toSpec && s.at >= t0), SKILL.toSpec, 'grilled, no spec yet'],
+    [!!d.task && !edit && !(d.skills ?? []).some(s => s.at >= t0), SKILL.grillMe, 'new task, not grilled'],
   ]
   for (const [ok, name, why] of cands) if (ok && !used.has(name)) return { name, why }
   return undefined
