@@ -4,6 +4,7 @@ import { leanSet } from './lean'
 import { workloadSet } from './workload'
 import { advisorSet } from './advisor'
 import { testingSet } from './testing'
+import { KNOW_READ, KNOW_WRITE, knowledgeSet } from './knowledge'
 import { deckOpenNow, deckReset, deckSet, deckTask } from './deck'
 
 /**
@@ -80,6 +81,26 @@ export async function registerHelmTools($: EngineInterface): Promise<void> {
     isDeferred: false,
   })
   await $.tool.register({
+    name: 'knowledge',
+    description:
+      'Project knowledge index (.claude/helm/knowledge). action: add (topic, paths, note), remove (topic), stale, status, ' +
+      'vision (text), term (term, text; writes GLOSSARY.md).',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: [...KNOW_WRITE, ...KNOW_READ] },
+        topic: { type: 'string' },
+        paths: { type: 'array', items: { type: 'string' } },
+        note: { type: 'string' },
+        text: { type: 'string' },
+        term: { type: 'string' },
+        tracked: { type: 'array', items: { type: 'string' } },
+      },
+    },
+    isDeferred: false,
+  })
+  await $.tool.register({
     name: 'set_task',
     description:
       'Saves the approved prompt as the current task (.claude/helm/task.md) and sets the deck task to its goal. ' +
@@ -117,6 +138,7 @@ export async function handleHelmTool($: EngineInterface, tool: string, args: Rec
   if (tool === 'mcp__helm__workload') return toolText(await workloadSet($, str(args.action)))
   if (tool === 'mcp__helm__advisor') return toolText(await advisorSet($, str(args.action)))
   if (tool === 'mcp__helm__testing') return toolText(await testingSet($, str(args.action)))
+  if (tool === 'mcp__helm__knowledge') return toolText(await knowledgeSet($, args))
   if (tool === 'mcp__helm__set_task') {
     const prompt = str(args.prompt)?.trim()
     const goal = str(args.goal)?.trim()
