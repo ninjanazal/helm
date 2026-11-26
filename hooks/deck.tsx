@@ -1,6 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import { COMMIT_RE, DRIFT_AT, PANE_FRAME_MS, PIPE_ROWS, TEST_RE, addCtx, addFive, addSkill, skillCommand, keepLimits, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, layout, live, pipeline, terms, tokenSplit, toolPhase, topicShift, verdict } from './deck-core'
+import type { KnowView } from './deck-core'
+import { COMMIT_RE, KNOW_ROWS, DRIFT_AT, PANE_FRAME_MS, PIPE_ROWS, TEST_RE, addCtx, addFive, addSkill, skillCommand, keepLimits, knowOp, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, knowStrip, layout, live, pipeline, terms, tokenSplit, toolPhase, topicShift, verdict } from './deck-core'
 import type { DeckData, FeedItem, Phase, StepUsage } from './deck-core'
 import type { DeckDone, DeckState } from '../types'
 import { readLevel } from './lean'
@@ -8,6 +9,8 @@ import { readMode } from './workload'
 import { readLevel as readTesting } from './testing'
 import { readAdvisor, readAdvisorModel } from './advisor'
 import { trackerFor } from './pipeline'
+import { knowledgeStats } from './knowledge'
+import type { KnowStats } from './knowledge'
 
 /**
  * The deck pane: the session's health beside the chat. Every figure comes from the engine (session.measure,
@@ -25,6 +28,9 @@ let running = false
 let tracker = false
 /** What the main session is doing, for the pipeline; waiting is read at draw time from the pane's props. */
 let phase: Phase = { kind: 'idle' }
+/** The knowledge store's figures and its last read or write, for the strip under the pipeline. */
+let know: KnowView = {}
+async function refreshKnow($: EngineInterface) { know = { ...know, stats: await knowledgeStats($).catch(() => undefined) } }
 let tickGen = 0
 /** Off (/helm:switch off): no auto-open, no reopen after /clear, no polling. */
 let deckIsOn = true
@@ -148,10 +154,11 @@ export const registerDeck: Register = on => {
     const lines = layout(deck(v, w - 1, f, now), w, f, running)
     // the live list and the pipeline only in a docked pane's free rows: inline, the frame fits the tree, so no row is free
     const free = e.props.placement === 'dock' ? (e.props.scroll?.bodyRows ?? 0) - lines.length : 0
-    const pipe = pipeline(p, f, w - 1, free, s.cur && !s.curDone ? totalTok(s) - s.cur.tok0 : 0)
-    const list = live(v, w, free - pipe.length, f, now)
+    const strip = free >= PIPE_ROWS + KNOW_ROWS ? knowStrip(know, now, w - 1, KNOW_ROWS) : []
+    const pipe = pipeline(p, f, w - 1, free - strip.length, s.cur && !s.curDone ? totalTok(s) - s.cur.tok0 : 0)
+    const list = live(v, w, free - strip.length - pipe.length, f, now)
     lines.push(...list)
-    if (pipe.length) lines.push(...Array.from({ length: free - list.length - PIPE_ROWS }, () => []), ...pipe.map(l => [{ t: ' ' }, ...l]))
+    if (pipe.length) lines.push(...Array.from({ length: free - list.length - strip.length - PIPE_ROWS }, () => []), ...[...pipe, ...strip].map(l => [{ t: ' ' }, ...l]))
     return (
       <Box flexDirection="column" width={cols} paddingX={1}>
         {lines.map((l, i) => (
@@ -171,6 +178,7 @@ export async function deckStart($: EngineInterface) {
   await quiet(async () => { stored = await $.store.get(await onKey($)) })
   deckIsOn = isDeckOn(stored)
   await quiet(async () => { tracker = await trackerFor($) })
+  await quiet(() => refreshKnow($))
   // /clear and /new fire session.start again: only the newest registration's timers do work.
   const gen = ++tickGen
   $.clock.every(PANE_FRAME_MS, () => void (gen === tickGen && deckIsOn && running && quiet(() => update($, frame, f => f + 1))))
@@ -321,6 +329,11 @@ export async function deckTool($: EngineInterface, e: { tool: string; agentId?: 
       f = { kind: 'note', text: `agent: ${String(input.description ?? '')}`.slice(0, 40) }
     }
     const fp = String(input.file_path ?? input.notebook_path ?? '')
+    const op = knowOp(tool, input)
+    if (op && !err) {
+      know = { ...know, op, at: now }
+      await refreshKnow($)
+    }
     if (fp && (tool === 'Read' || tool === 'Edit' || tool === 'Write' || tool === 'NotebookEdit')) {
       const cwd = (await $.session.cwd().catch(() => '')) ?? ''
       const rel = cwd && fp.startsWith(cwd + '/') ? fp.slice(cwd.length + 1) : fp.split('/').slice(-3).join('/')

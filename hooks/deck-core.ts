@@ -5,6 +5,7 @@
  */
 
 import { SKILL } from './pipeline'
+import type { KnowStats } from './knowledge'
 import type { DeckAgent, DeckCheck, DeckTodo } from '../types'
 
 /** A run of text: `c` its colour, `bg` a fill (the text then draws in `inverseText`), `b` bold, `d` dim. Theme names only. */
@@ -758,6 +759,30 @@ export function pipeline(p: Phase, frame: number, w: number, rows: number, turnT
   return [centre(barRow), [], centre([{ t: spin + ' ', c: tone }, ...label])]
 }
 
+/** The knowledge strip's height in rows, and how long a lit cell stays lit. */
+export const KNOW_ROWS = 2
+export const KNOW_LIT_MS = 2000
+const fmtBytes = (b: number) => (b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} KB`)
+
+/**
+ * Two rows, centred, under the pipeline: `read` · `knowledge` · `write` as three cells (the middle one always dim-filled;
+ * the read or write cell lit for 2000 ms after a knowledge read or write), then `N entries · size · P% covered` and
+ * ` · K stale` when some. None without stats or when it does not fit.
+ */
+export type KnowView = { stats?: KnowStats; op?: 'read' | 'write'; at?: number }
+export function knowStrip(k: KnowView, now: number, w: number, rows: number): Line[] {
+  if (!k.stats || rows < KNOW_ROWS || w < PIPE_W) return []
+  const n = Math.min(14, Math.floor((w - 2) / 3))
+  const lit = k.op && k.at !== undefined && now - k.at < KNOW_LIT_MS ? k.op : undefined
+  const cell = (s: string) => { const t = [...s].slice(0, n); const l = (n - t.length) >> 1; return ' '.repeat(l) + t.join('') + ' '.repeat(n - t.length - l) }
+  const third = (name: string, op?: 'read' | 'write'): Seg => (op && op === lit ? { t: cell(name), bg: op === 'read' ? 'suggestion' : 'warning', b: true } : op ? { t: '▱'.repeat(n), c: 'subtle' } : { t: cell(name), bg: 'subtle', b: true })
+  const barRow: Line = [third('read', 'read'), { t: ' ' }, third('knowledge'), { t: ' ' }, third('write', 'write')]
+  const { entries, bytes, coverage, stale } = k.stats
+  const label: Line = [{ t: `${entries} entries · ${fmtBytes(bytes)} · ${coverage}% covered`, d: true }, ...(stale > 0 ? [{ t: ` · ${stale} stale`, c: 'warning' }] : [])]
+  const centre = (l: Line): Line => { const c = clip(l, w); const pad = (w - len(c)) >> 1; return pad > 0 ? [{ t: ' '.repeat(pad) }, ...c] : c }
+  return [centre(barRow), centre(label)]
+}
+
 const FEED_ICON: Record<FeedItem['kind'], string> = { find: '⌕', read: '≡', edit: '✎', run: '›', test: '✔', topic: '↯', note: '·' }
 /** The live list's age column: `12s`, `4m`, `1h`. */
 const AGE_W = 4
@@ -785,4 +810,12 @@ export function live(d: Pick<DeckData, 'feed' | 'agents' | 'running'>, w: number
 /** Whether the deck opens: on unless stored off for the project. */
 export function isDeckOn(stored: unknown): boolean {
   return stored !== false
+}
+
+/** Whether a tool call reads or writes the knowledge store (or the glossary), from its name and input. */
+export function knowOp(tool: string, input: Record<string, unknown>): 'read' | 'write' | undefined {
+  if (tool === 'Read') { const p = String(input.file_path ?? ''); return p.includes('.claude/helm/knowledge') || /(^|\/)GLOSSARY\.md$/.test(p) ? 'read' : undefined }
+  if (tool !== 'mcp__helm__knowledge') return undefined
+  const a = String(input.action ?? '')
+  return a === 'status' || a === 'stale' ? 'read' : ['add', 'remove', 'vision', 'term'].includes(a) ? 'write' : undefined
 }

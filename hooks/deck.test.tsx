@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { COMMIT_RE, addSkill, skillCommand, suggestSkills, AUTO_SKILLS, keepLimits, FIVE_CHART_MIN, FIVE_CHART_SPREAD, fmtDur, addCtx, addFive, agentDone, agentStep, agentTag, applyStep, applyTodo, bar, brailleLine, isDeckOn, deck, pipeline, toolPhase, live, marquee, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
+import { COMMIT_RE, addSkill, skillCommand, suggestSkills, AUTO_SKILLS, keepLimits, knowOp, FIVE_CHART_MIN, FIVE_CHART_SPREAD, fmtDur, addCtx, addFive, agentDone, agentStep, agentTag, applyStep, applyTodo, bar, brailleLine, isDeckOn, deck, pipeline, knowStrip, KNOW_ROWS, toolPhase, live, marquee, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
 import type { DeckData, FiveSample } from './deck-core'
 
 const data = (x: Partial<DeckData> = {}): DeckData => ({
@@ -710,4 +710,28 @@ test('skills section: auto suggestions render ⚡, manual ones →', () => {
   expect(rows[0]).toBe('⚡ superpowers:verification-before-completion · auto · edited, not verified')
   expect(rows.some(r => r.startsWith('⚡ mattpocock-skills:tdd'))).toBe(true)
   expect(rows.some(r => r.startsWith('→ mattpocock-skills:pr · committed'))).toBe(true)
+})
+
+test('knowStrip: lit cell for 2000 ms, label with stale, empty without stats or rows', () => {
+  const stats = { entries: 12, bytes: 3174, coverage: 50, stale: 0 }
+  const row = (l: ReturnType<typeof knowStrip>, i = 0) => l[i]!.map(s => s.t).join('')
+  const lit = (l: ReturnType<typeof knowStrip>) => l[0]!.filter(s => s.bg && s.bg !== 'subtle').map(s => s.t.trim())
+  expect(lit(knowStrip({ stats, op: 'read', at: 1000 }, 2500, 40, KNOW_ROWS))).toEqual(['read'])
+  expect(lit(knowStrip({ stats, op: 'write', at: 1000 }, 2500, 40, KNOW_ROWS))).toEqual(['write'])
+  const idle = knowStrip({ stats, op: 'read', at: 1000 }, 3000, 40, KNOW_ROWS)
+  expect(lit(idle)).toEqual([])
+  expect(row(idle)).toContain('▱')
+  expect(idle[0]!.some(s => s.bg === 'subtle' && s.t.includes('knowledge'))).toBe(true)
+  expect(row(idle, 1).trim()).toBe('12 entries · 3.1 KB · 50% covered')
+  expect(row(knowStrip({ stats: { ...stats, stale: 2 } }, 0, 50, KNOW_ROWS), 1).trim()).toBe('12 entries · 3.1 KB · 50% covered · 2 stale')
+  expect(knowStrip({}, 0, 40, KNOW_ROWS)).toEqual([])
+  expect(knowStrip({ stats }, 0, 40, KNOW_ROWS - 1)).toEqual([])
+})
+
+test('knowOp: classifies knowledge tool and file reads', () => {
+  expect(knowOp('mcp__helm__knowledge', { action: 'add' })).toBe('write')
+  expect(knowOp('mcp__helm__knowledge', { action: 'status' })).toBe('read')
+  expect(knowOp('Read', { file_path: '/r/.claude/helm/knowledge/index.md' })).toBe('read')
+  expect(knowOp('Read', { file_path: '/r/GLOSSARY.md' })).toBe('read')
+  expect(knowOp('Read', { file_path: '/r/x.ts' })).toBeUndefined()
 })

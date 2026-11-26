@@ -39,6 +39,10 @@ rm -rf ~/.local/share/helm/atlas         # user-scope venv
 rm -rf .claude/helm/tasks .claude/helm/team.json
 ```
 
+## 🗺️ Knowledge
+
+`/helm:map [topic]` writes a short index of the repo into `.claude/helm/knowledge/index.md`: one line per top-level area with up to three paths and a note on what it is for. Glossary terms go to the repo's `GLOSSARY.md` and the vision to `vision.md`, both linked, never copied. The index is injected at session start (capped at 60 lines or 4 KB) and says "Check this index before searching; read linked files only when relevant." Entries whose path is gone are dropped from the injected index, not deleted. It is plain Markdown built by the model, with no server, no embeddings and no new dependencies.
+
 ## 🧭 Deck
 
 - `/helm:switch` opens the pane; `/helm:switch on|off` turns helm (the deck and lean mode) on or off for the project; off survives `/clear` and new sessions. Each approved `/helm:prompt` re-anchors the task and resets drift.
@@ -55,6 +59,7 @@ rm -rf .claude/helm/tasks .claude/helm/team.json
 | `/helm:testing [off \| light \| thorough]` | How much testing the host writes and runs: `off` none unless asked, `light` (default) only for risky logic, `thorough` test-first with edge cases, regression tests and the full suite. Pin per project with `.claude/helm/testing` |
 | `/helm:workload [off \| sometimes \| always]` | Hand work to cheaper sub agents: `off` never; `sometimes` (default) only where a cheaper model or lower effort is clearly cheaper and exactly briefable; `always` every unit (implementation, exploration, tests, docs) to a cheaper model or effort than the host (haiku < sonnet < opus, never above the host, always cheaper), host plans and verifies. Non-off modes list model and effort per unit for your approval. The deck chip shows the measured share, e.g. `25% delegated`. Pin per project with `.claude/helm/workload` |
 | `/helm:advisor [low \| mid \| high]` | How often the model consults the built-in advisor while planning: `low`, `mid` (default), `high`. Pin per project with `.claude/helm/advisor` |
+| `/helm:map [topic]` | Map the repo into the knowledge index (`.claude/helm/knowledge/`): one line per area, with the glossary and vision in `GLOSSARY.md` and `vision.md`. Reports coverage and stale entries |
 | `/helm:commit [--dry]` | Commit the staged changes: Conventional Commits subject, bulleted body, no attribution lines |
 | `/helm:help` | The full guide |
 
