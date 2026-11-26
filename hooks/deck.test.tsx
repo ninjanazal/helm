@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { fmtDur, addCtx, addFive, agentDone, agentStep, applyStep, applyTodo, bar, brailleLine, isDeckOn, deck, pipeline, toolPhase, live, marquee, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
+import { COMMIT_RE, addSkill, skillCommand, suggestSkills, AUTO_SKILLS, keepLimits, FIVE_CHART_MIN, FIVE_CHART_SPREAD, fmtDur, addCtx, addFive, agentDone, agentStep, agentTag, applyStep, applyTodo, bar, brailleLine, isDeckOn, deck, pipeline, toolPhase, live, marquee, drift, driftGauge, layout, len, paceToLimit, terms, topicShift, verdict } from './deck-core'
 import type { DeckData, FiveSample } from './deck-core'
 
 const data = (x: Partial<DeckData> = {}): DeckData => ({
@@ -65,7 +65,8 @@ test('deck: every section, fits the width, animates only while running', () => {
   expect(fresh).not.toContain('tokens 0')
   expect(fresh).toContain('your next prompt becomes the task')
   // tokens: in = input + cache writes, out = output; no $/h rate
-  expect(t).toContain('$4.80 · in 2.0k · out 2.0k')
+  expect(t).toContain('$4.80  ·  ↓ 2.0k in  ·  ↑ 2.0k out')
+  expect(t).toMatch(/^ +\$4\.80  ·  ↓ 2\.0k in/m)
   expect(t).not.toContain('/h')
   expect(t).not.toContain('rate ')
   const big = text(deck(data({ tokens: { input: 1000, output: 2000, cacheRead: 1_400_000, cacheWrite: 1000 } }), 46, 0, now))
@@ -137,12 +138,42 @@ test('agents: one compact row each, running first; the title counts running agen
   const secs = deck(data({ agents: [agent('b', { endedAt: 3.6e6 - 5000 }), agent('a')] }), 60, 0, 3.6e6)
   const ag = secs.find(x => x.id === 'agents')!
   expect(ag.title).toBe('⌁ AGENTS')
-  expect(ag.meta).toBe('1 running · 25k')
+  expect(ag.meta).toBe('1 running · 25k total')
   const rows = ag.body.map(l => l.map(s => s.t).join(''))
   expect(rows.length).toBe(2)
-  expect(rows[0]).toMatch(/^⠋ Explore · audit part a +12k 1m$/)
-  expect(rows[1]).toBe('✔ Explore · audit part b · 12k')
-  expect(ag.body[1]![2]!.d).toBe(true)
+  expect(rows[0]).toMatch(/^⠋ audit part a · Explore · haiku-5-5 · 12k 1m$/)
+  expect(rows[1]).toBe('✔ audit part b · Explore · haiku-5-5 · 12k')
+  expect(ag.body[1]![3]!.d).toBe(true)
+})
+
+test('agentTag: general-purpose reads general, other types unchanged, none is empty', () => {
+  expect(agentTag('general-purpose')).toBe('general')
+  expect(agentTag('Explore')).toBe('Explore')
+  expect(agentTag(undefined)).toBe('')
+})
+
+const doneRow = (x: object) => deck(data({ agents: [{ id: 'a', task: 'Rebase root', type: 'general-purpose', model: 'sonnet-5-5', tokens: 40000, steps: 1, startedAt: 0, endedAt: 1, ...x }] }), 60, 0, 3.6e6)
+  .find(s => s.id === 'agents')!.body[0]!.map(s => s.t).join('')
+
+test('agent row: task first, then the tag, then model·effort', () => {
+  const row = doneRow({ effort: 'medium' })
+  expect(row.indexOf('Rebase root')).toBeLessThan(row.indexOf('general'))
+  expect(row).toContain('sonnet-5-5·medium')
+})
+
+test('agent row: without effort the model is followed by a spaced dot', () => {
+  const row = doneRow({})
+  expect(row).toContain('sonnet-5-5 · 40')
+  expect(row).not.toContain('sonnet-5-5·')
+})
+
+test('applyStep: effort is stored on the agent, and a step without effort keeps it', () => {
+  const u = { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+  let s = { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } } as { tokens: DeckData['tokens']; agents?: DeckData['agents'] }
+  s = applyStep(s, { agentId: 'a1', model: 'claude-haiku-5-5', effort: 'high' }, u, 0, { task: 'audit hooks', type: 'Explore' })
+  expect(s.agents![0]!.effort).toBe('high')
+  s = applyStep(s, { agentId: 'a1', model: 'claude-haiku-5-5' }, u, 10)
+  expect(s.agents![0]!.effort).toBe('high')
 })
 
 test('idle frames are static, and every colour is a theme name', () => {
@@ -206,7 +237,7 @@ test('tab layout: lower-case filled title tabs with a rule; the light sweeps onl
   const secs = deck(data({ agents: [agent('a')] }), 44, 7, 3.6e6)
   const on = layout(secs, 46, 7, true).map(l => l.map(s => s.t).join(''))
   expect(on.some(l => l.startsWith(' ◇ focus  ─'))).toBe(true)
-  expect(on.some(l => l.startsWith(' ⌁ agents  1 running · 12k ─'))).toBe(true)
+  expect(on.some(l => l.startsWith(' ⌁ agents  1 running · 12k total ─'))).toBe(true)
   expect(on.some(l => l.includes('/helm:'))).toBe(false)
   for (const l of on) expect([...l].length).toBeLessThanOrEqual(46)
   // the light moves along the agents rule over a few frames
@@ -491,4 +522,192 @@ test('task: advisor model warns when weaker than the session model', () => {
   expect(text(80, { model: 'sonnet-5-5', advisorModel: 'opus' }).some(l => l.includes('⚠'))).toBe(false)
   expect(text(80, { model: 'sonnet-5-5' }).some(l => l.includes('mid opus'))).toBe(false)
   for (const w of [30, 40, 80]) expect(text(w, { model: 'sonnet-5-5', advisorModel: 'haiku' }).every(l => [...l].length <= w)).toBe(true)
+})
+
+test('keepLimits: a kind missing from an update is kept until its reset passes', () => {
+  const five = { kind: 'five_hour', percentUsed: 40, resetsAt: 10_000 }
+  expect(keepLimits([five], [], 5_000_000)).toEqual([five])
+  expect(keepLimits([five], [], 11_000_000)).toEqual([])
+  const week = { kind: 'seven_day', percentUsed: 8 }
+  expect(keepLimits([five, week], [{ kind: 'five_hour', percentUsed: 50 }], 0)).toEqual([{ kind: 'five_hour', percentUsed: 50 }, week])
+})
+
+test('usage: the 5h meter shows at narrow and wide widths, with and without a chart', () => {
+  const lim = [{ kind: 'five_hour', percentUsed: 13, resetsAt: 4 * 3600 }]
+  const fiveSeries = Array.from({ length: FIVE_CHART_MIN }, (_, i) => ({ at: i * 60_000, pct: 4 + Math.round((i * (FIVE_CHART_SPREAD + 2)) / (FIVE_CHART_MIN - 1)) }))
+  for (const w of [32, 60]) for (const fs of [[], fiveSeries]) {
+    const r = deck(data({ limits: lim, fiveSeries: fs }), w, 0, 3.6e6).find(s => s.id === 'usage')!.body.map(l => l.map(s => s.t).join(''))
+    expect(r.some(x => x.startsWith('5h') && /[▰▱]/.test(x))).toBe(true)
+  }
+})
+
+const sg = (x: Partial<DeckData> = {}) => data({ task: undefined, changes: undefined, feed: [], running: false, ...x })
+const NOW = 3.6e6
+const T = (at: number, tone: 'good' | 'bad') => ({ at, kind: 'test' as const, text: 'test', note: tone === 'bad' ? 'failed' : 'passed', tone })
+const E = (at: number) => ({ at, kind: 'edit' as const, text: 'a.ts' })
+const R = (at: number) => ({ at, kind: 'run' as const, text: 'x', note: 'exit≠0', tone: 'bad' as const })
+
+const suggestSkill = (d: DeckData, n: number) => { const r = suggestSkills(d, n)[0]; return r && { name: r.name, why: r.why } }
+
+test('suggestSkill: rules a-f, priority, used skills skipped', () => {
+  const DB = 'mattpocock-skills:diagnosing-bugs'
+  const ch = { files: 2, added: 1, removed: 0 }
+  const sk = (name: string, at: number) => ({ name, at, via: 'tool' as const })
+  expect(suggestSkill(sg({ feed: [T(1, 'bad')] }), NOW)).toEqual({ name: DB, why: 'tests failing' })
+  expect(suggestSkill(sg({ feed: [R(NOW - 5), R(NOW - 4)] }), NOW)).toEqual({ name: DB, why: 'commands failing' })
+  expect(suggestSkill(sg({ feed: [R(NOW - 5)] }), NOW)).toBeUndefined()
+  expect(suggestSkill(sg({ feed: [E(5), T(3, 'good')] }), NOW)).toEqual({ name: 'superpowers:verification-before-completion', why: 'edited, not verified' })
+  expect(suggestSkill(sg({ feed: [E(5)] }), NOW)?.why).toBe('edited, not verified')
+  // c: pass + uncommitted, unreviewed; d: reviewed after the edit
+  const pc = sg({ feed: [E(1), T(3, 'good')], changes: ch })
+  expect(suggestSkill(pc, NOW)).toEqual({ name: 'mattpocock-skills:code-review', why: 'checks pass, unreviewed' })
+  expect(suggestSkill({ ...pc, skills: [sk('mattpocock-skills:code-review', 0)] }, NOW)?.name).toBe('mattpocock-skills:code-review')
+  expect(suggestSkill({ ...pc, skills: [sk('mattpocock-skills:code-review', NOW - 1000)] }, NOW)).toEqual({ name: 'helm:commit', why: 'checks pass, uncommitted' })
+  // e: grilled with a tracker -> to-spec; without one, nothing (f needs no skill used)
+  const g = sg({ task: 'x', tracker: true, skills: [sk('mattpocock-skills:grilling', 10)] })
+  expect(suggestSkill(g, NOW)).toEqual({ name: 'mattpocock-skills:to-spec', why: 'grilled, no spec yet' })
+  expect(suggestSkill({ ...g, tracker: false }, NOW)?.name).toBe('superpowers:writing-plans')
+  expect(suggestSkill({ ...g, skills: [sk('mattpocock-skills:grill-me', 10)] }, NOW)?.name).toBe('mattpocock-skills:to-spec')
+  // to-spec ran after t0 (outside the used window): not suggested again
+  expect(suggestSkill({ ...g, skills: [...g.skills, sk('mattpocock-skills:to-spec', 20)] }, NOW)).toBeUndefined()
+  // f
+  expect(suggestSkill(sg({ task: 'x' }), NOW)).toEqual({ name: 'mattpocock-skills:grill-me', why: 'new task, not grilled' })
+  expect(suggestSkill(sg({ task: 'x', skills: [{ name: 'helm:prompt', at: 0, via: 'tool' }] }), NOW)).toBeUndefined()
+  // priority: failing test beats a new task and an edit
+  expect(suggestSkill(sg({ task: 'x', feed: [T(1, 'bad')] }), NOW)?.name).toBe(DB)
+  expect(suggestSkill(sg({ feed: [T(1, 'bad'), E(5)] }), NOW)?.why).toBe('tests failing')
+  // recently used or running: skipped, falls through to b
+  const dbg = { name: DB, at: NOW - 1000, via: 'tool' as const }
+  expect(suggestSkill(sg({ feed: [T(1, 'bad'), E(5)], skills: [dbg] }), NOW)?.why).toBe('edited, not verified')
+  expect(suggestSkill(sg({ taskAt: 0, feed: [T(1, 'bad')], skills: [{ ...dbg, at: -1 }] }), NOW)?.why).toBe('tests failing')
+  expect(suggestSkill(sg({ feed: [T(1, 'bad')], skills: [{ ...dbg, at: 100 }], running: true, skillsSince: 50 }), NOW)).toBeUndefined()
+})
+
+test('skills: command names and the history list', () => {
+  expect(skillCommand('/helm:prompt x')).toBe('helm:prompt')
+  expect(skillCommand('/clear')).toBeUndefined()
+  expect(skillCommand('/brainstorm', ['brainstorm'])).toBe('brainstorm')
+  const l = [1, 2, 3, 4].map(i => ({ name: `s${i}`, at: i, via: 'tool' as const }))
+  expect(addSkill(l, { name: 's2', at: 9, via: 'command' }).map(s => s.name)).toEqual(['s1', 's3', 's4', 's2'])
+  expect(addSkill(l, { name: 's5', at: 9, via: 'tool' }).map(s => s.name)).toEqual(['s2', 's3', 's4', 's5'])
+})
+
+test('deck: skills section sits between focus and usage and fits', () => {
+  for (const w of [32, 60]) {
+    const on = deck(data({ running: true, skillsSince: 10, skills: [{ name: 'superpowers:verification-before-completion', at: 5, via: 'tool' }, { name: 'superpowers:systematic-debugging', at: 20, via: 'tool' }] }), w, 0, NOW)
+    const ids = on.map(x => x.id)
+    expect(ids.indexOf('skills')).toBe(ids.indexOf('focus') + 1)
+    expect(ids.indexOf('usage')).toBe(ids.indexOf('skills') + 1)
+    const sk = on.find(x => x.id === 'skills')!
+    expect(sk.tone).toBe('claude')
+    expect(sk.body[0]!.map(s => s.t).join('')).toContain('▸ superpowers:systematic-debugg')
+    for (const l of sk.body) expect(len(l)).toBeLessThanOrEqual(w)
+  }
+  expect(deck(sg(), 46, 0, NOW).some(x => x.id === 'skills')).toBe(false)
+})
+
+test('suggestSkill: a skill used before taskAt does not stop grill-me', () => {
+  const old = { name: 'helm:prompt', at: 50, via: 'tool' as const }
+  expect(suggestSkill(sg({ task: 'x', taskAt: 100, skills: [old] }), NOW)?.name).toBe('mattpocock-skills:grill-me')
+})
+
+test('suggestSkill: a failing test from before taskAt does not trigger debugging', () => {
+  expect(suggestSkill(sg({ feed: [T(1, 'bad')], taskAt: 100 }), NOW)).toBeUndefined()
+})
+
+test('deck: with skills, usage and agents sections still show at w=60', () => {
+  const ids = deck(data({ skills: [{ name: 'helm:prompt', at: 5, via: 'tool' }], agents: [agent('a')] }), 60, 0, NOW).map(x => x.id)
+  expect(ids).toContain('usage')
+  expect(ids).toContain('agents')
+  expect(ids).toContain('skills')
+})
+
+const txtOf = (l: { t: string }[]) => l.map(s => s.t).join('')
+
+test('agents: shown rows plus the remainder equal the header total', () => {
+  const ag = ['a', 'b', 'c', 'd', 'e'].map((id, i) => agent(id, { tokens: 1000 * (i + 1), endedAt: 3.6e6 - 1000 * (5 - i) }))
+  const sec = deck(data({ agents: ag }), 60, 0, 3.6e6).find(x => x.id === 'agents')!
+  expect(sec.meta).toBe('15k total')
+  const rows = sec.body.map(txtOf)
+  expect(rows.length).toBe(5)
+  expect(rows.at(-1)).toBe('+1 more · 1.0k')
+  expect(rows.slice(0, 4).join(' ')).toMatch(/5\.0k.*4\.0k.*3\.0k.*2\.0k/)
+  expect(deck(data({ agents: ag, delegated: 500_000 }), 60, 0, 3.6e6).find(x => x.id === 'agents')!.meta).toBe('500k total')
+})
+
+test('usage tail: agents item only when delegated > 0', () => {
+  const tail = (x: object, w = 60) => txtOf(deck(data({ tokens: { input: 5000, output: 2000, cacheRead: 0, cacheWrite: 0 }, ...x }), w, 0, 3.6e6).find(s => s.id === 'usage')!.body.at(-1)!)
+  expect(tail({ delegated: 201_000 })).toContain('⌁ 201k agents')
+  expect(tail({ delegated: 201_000 }, 24)).toContain('⌁201k')
+  expect(tail({ delegated: 201_000 }, 24)).not.toContain('agents')
+  expect(tail({ delegated: 0 })).not.toContain('agents')
+  expect(tail({})).not.toContain('agents')
+})
+
+test('suggestSkills: new rules, priority, cap of 3, auto flags', () => {
+  const sk = (name: string, at: number) => ({ name, at, via: 'tool' as const })
+  const names = (x: Partial<DeckData>) => suggestSkills(sg(x), NOW).map(r => r.name)
+  expect(suggestSkills(sg({ task: 'x', skills: [sk('mattpocock-skills:grilling', 10)] }), NOW))
+    .toEqual([{ name: 'superpowers:writing-plans', why: 'grilled, no plan yet', auto: true }])
+  expect(names({ task: 'x', tracker: true, skills: [sk('mattpocock-skills:grilling', 10)] })).toEqual(['mattpocock-skills:to-spec'])
+  expect(suggestSkills(sg({ feed: [E(5)] }), NOW)).toEqual([
+    { name: 'superpowers:verification-before-completion', why: 'edited, not verified', auto: true },
+    { name: 'mattpocock-skills:tdd', why: 'building, no test yet', auto: true },
+  ])
+  expect(names({ feed: [E(5), T(6, 'good')] })).not.toContain('mattpocock-skills:tdd')
+  const C = { at: 7, kind: 'run' as const, text: 'git commit -m "x"', note: 'commit' }
+  expect(suggestSkills(sg({ feed: [C] }), NOW)).toEqual([{ name: 'mattpocock-skills:pr', why: 'committed, no PR body', auto: false }])
+  expect(names({ feed: [{ ...C, note: 'exit≠0', tone: 'bad' as const }] })).toEqual([])
+  expect(suggestSkills(sg({ ctx: { window: 100, percent: 80 } }), NOW)).toEqual([{ name: 'mattpocock-skills:handoff', why: 'context near full', auto: false }])
+  expect(names({ ctx: { window: 100, tokens: 79 } })).toEqual([])
+  expect(names({ ctx: { window: 100, tokens: 90 } })).toEqual(['mattpocock-skills:handoff'])
+  const all = sg({ feed: [T(1, 'bad'), E(5), C], ctx: { window: 100, percent: 90 } })
+  expect(suggestSkills(all, NOW).map(r => r.name)).toEqual(['mattpocock-skills:diagnosing-bugs', 'mattpocock-skills:handoff', 'superpowers:verification-before-completion'])
+  expect([...AUTO_SKILLS].sort()).toEqual(['mattpocock-skills:code-review', 'mattpocock-skills:diagnosing-bugs', 'mattpocock-skills:tdd', 'superpowers:verification-before-completion', 'superpowers:writing-plans'])
+})
+
+test('suggestSkills: the testing level gates tdd', () => {
+  const tdd = (testing?: 'off' | 'light' | 'thorough') => suggestSkills(sg({ feed: [E(5)], testing }), NOW).find(r => r.name === 'mattpocock-skills:tdd')
+  expect(tdd('off')).toBeUndefined()
+  expect(tdd('light')?.auto).toBe(false)
+  expect(tdd('thorough')?.auto).toBe(true)
+})
+
+test('suggestSkills: an auto skill that ran since the latest edit is not suggested again', () => {
+  const V = 'superpowers:verification-before-completion'
+  const sk = (at: number) => ({ name: V, at, via: 'tool' as const })
+  const now = 10_000_000
+  const X = now - 2_000_000
+  const edit = { at: X, kind: 'edit' as const, text: 'a.ts' }
+  const names = (x: Partial<DeckData>) => suggestSkills(sg(x), now).map(r => r.name)
+  expect(names({ feed: [edit], skills: [sk(X + 1)] })).not.toContain(V)
+  expect(names({ feed: [edit], skills: [sk(X - 1)] })).toContain(V)
+})
+
+test('suggestSkills: diagnose fires again only on a failing test newer than its last run', () => {
+  const D = 'mattpocock-skills:diagnosing-bugs'
+  const sk = (at: number) => ({ name: D, at, via: 'tool' as const })
+  const names = (x: Partial<DeckData>) => suggestSkills(sg(x), NOW).map(r => r.name)
+  expect(names({ feed: [T(10, 'bad')], skills: [sk(5)] })).toContain(D)
+  expect(names({ feed: [T(3, 'bad')], skills: [sk(5)] })).not.toContain(D)
+})
+
+test('COMMIT_RE matches new commits, not amends', () => {
+  expect(COMMIT_RE.test('cd x && git add -A && git commit -m "a"')).toBe(true)
+  expect(COMMIT_RE.test('git commit -F -')).toBe(true)
+  expect(COMMIT_RE.test('git commit --amend --no-edit')).toBe(false)
+  expect(COMMIT_RE.test('git status')).toBe(false)
+})
+
+test('handoff ranks after diagnose, before verify and tdd', () => {
+  const r = suggestSkills(sg({ feed: [T(1, 'bad'), E(5)], ctx: { window: 100, percent: 85 } }), NOW).map(x => x.name)
+  expect(r.slice(0, 3)).toEqual(['mattpocock-skills:diagnosing-bugs', 'mattpocock-skills:handoff', 'superpowers:verification-before-completion'])
+  expect(suggestSkills(sg({ feed: [E(5)], ctx: { window: 100, percent: 85 } }), NOW).map(x => x.name).slice(0, 2)).toEqual(['mattpocock-skills:handoff', 'superpowers:verification-before-completion'])
+})
+
+test('skills section: auto suggestions render ⚡, manual ones →', () => {
+  const rows = deck(sg({ feed: [E(5), { at: 7, kind: 'run' as const, text: 'git commit -m x', note: 'commit' }] }), 80, 0, NOW).find(x => x.id === 'skills')!.body.map(txtOf)
+  expect(rows[0]).toBe('⚡ superpowers:verification-before-completion · auto · edited, not verified')
+  expect(rows.some(r => r.startsWith('⚡ mattpocock-skills:tdd'))).toBe(true)
+  expect(rows.some(r => r.startsWith('→ mattpocock-skills:pr · committed'))).toBe(true)
 })

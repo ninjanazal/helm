@@ -28,7 +28,7 @@ const MID = [
 ]
 const HIGH = [
   ...MID,
-  'Call it right after orientation, before brainstorming or writing a plan, so the approach is checked before it takes shape.',
+  'Call it right after orientation, before grilling or writing a plan, so the approach is checked before it takes shape.',
   'Call it on every revision of a plan, when the approach changes, and when results do not fit.',
 ]
 const RULES: Record<AdvisorLevel, string[]> = { low: LOW, mid: MID, high: HIGH }

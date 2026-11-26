@@ -3,13 +3,16 @@ export type DeckTurn = { ask?: string; cost0?: number; seq: string; at: number; 
 export type DeckDone = { n: number; seq: string; tok: number; ms: number; result: 'ok' | 'warn' | 'err' | 'none'; text: string; ask?: string; cost?: number }
 
 /** A sub agent the session started: its own steps and tokens (input + cache writes + output), kept apart from the main totals. */
-export type DeckAgent = { id: string; task: string; type?: string; model?: string; tokens: number; steps: number; startedAt: number; endedAt?: number }
+export type DeckAgent = { id: string; task: string; type?: string; model?: string; effort?: string; tokens: number; steps: number; startedAt: number; endedAt?: number }
 
 /** A task-list item's text and state. */
 export type DeckCheck = { text: string; state: 'todo' | 'working' | 'done' }
 
 /** One item of Claude's task list; `id` is the task tool's id, when it has one. */
 export type DeckTodo = DeckCheck & { id?: string }
+
+/** A skill the session used: by the Skill tool, or by a slash command. */
+export type DeckSkill = { name: string; at: number; via: 'tool' | 'command' }
 
 export type DeckState = {
   task?: string
@@ -50,6 +53,10 @@ export type DeckState = {
   ctxSeries?: number[]
   /** The 5h usage, a sample a minute, reset with its window. */
   fiveSeries?: { at: number; pct: number }[]
+  /** Skills used, newest last. */
+  skills?: DeckSkill[]
+  /** Time of the last prompt submit. */
+  skillsSince?: number
   /** The current 5h window's reset time, ms. */
   fiveAt?: number
   /** The prompt that starts the next turn, first line. */

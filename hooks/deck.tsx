@@ -1,12 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import { DRIFT_AT, PANE_FRAME_MS, PIPE_ROWS, TEST_RE, addCtx, addFive, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, layout, live, pipeline, terms, tokenSplit, toolPhase, topicShift, verdict } from './deck-core'
+import { COMMIT_RE, DRIFT_AT, PANE_FRAME_MS, PIPE_ROWS, TEST_RE, addCtx, addFive, addSkill, skillCommand, keepLimits, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, layout, live, pipeline, terms, tokenSplit, toolPhase, topicShift, verdict } from './deck-core'
 import type { DeckData, FeedItem, Phase, StepUsage } from './deck-core'
 import type { DeckDone, DeckState } from '../types'
 import { readLevel } from './lean'
 import { readMode } from './workload'
 import { readLevel as readTesting } from './testing'
 import { readAdvisor, readAdvisorModel } from './advisor'
+import { trackerFor } from './pipeline'
 
 /**
  * The deck pane: the session's health beside the chat. Every figure comes from the engine (session.measure,
@@ -20,6 +21,8 @@ const state_ = atom({ plugin: 'helm', key: 'deck' } as const, blank(), { shape: 
 const frame = atom({ plugin: 'helm', key: 'deckFrame' } as const, 0)
 
 let running = false
+/** Repo set up by /setup-matt-pocock-skills; refreshed at session start and on each prompt. */
+let tracker = false
 /** What the main session is doing, for the pipeline; waiting is read at draw time from the pane's props. */
 let phase: Phase = { kind: 'idle' }
 let tickGen = 0
@@ -49,7 +52,8 @@ async function poll($: EngineInterface) {
   const opts = cwd ? { cwd, timeoutMs: 3000 } : { timeoutMs: 3000 }
   await quiet(async () => {
     const u = await $.session.usage()
-    await set($, s => ({ ...s, ctx: u.context, limits: (u.rateLimits ?? []).map(r => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt })), cost: u.cost?.usd, startedAt: u.startedAt }))
+    const now = await $.clock.now()
+    await set($, s => ({ ...s, ctx: u.context, limits: keepLimits(s.limits, (u.rateLimits ?? []).map(r => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt })), now), cost: u.cost?.usd, startedAt: u.startedAt }))
   })
   await quiet(async () => {
     const lean = await readLevel($)
@@ -98,7 +102,13 @@ function view(s: DeckState): DeckData {
     limits: s.limits ?? [],
     drift: drift(pct, topicShift(new Set(s.taskTerms), recent), s.turns),
     running,
+    tracker,
   }
+}
+
+/** The deck's live data, as the pane sees it. */
+export async function deckData($: EngineInterface): Promise<DeckData> {
+  return view(await read($, state_))
 }
 
 export const registerDeck: Register = on => {
@@ -160,6 +170,7 @@ export async function deckStart($: EngineInterface) {
   let stored: unknown
   await quiet(async () => { stored = await $.store.get(await onKey($)) })
   deckIsOn = isDeckOn(stored)
+  await quiet(async () => { tracker = await trackerFor($) })
   // /clear and /new fire session.start again: only the newest registration's timers do work.
   const gen = ++tickGen
   $.clock.every(PANE_FRAME_MS, () => void (gen === tickGen && deckIsOn && running && quiet(() => update($, frame, f => f + 1))))
@@ -198,13 +209,19 @@ export function deckCleared($: EngineInterface) {
 
 export async function deckPrompt($: EngineInterface, e: { text: string; isMeta?: true; command?: unknown }) {
   if (reopenPending) deckOpen($)
+  await quiet(async () => { tracker = await trackerFor($) })
   await quiet(async () => {
     if (e.isMeta) return
     // the next turn's receipt names what was asked: the first line, commands included
     const ask = e.text.trim().split('\n')[0]!.replace(/\s+/g, ' ').slice(0, 60)
     await set($, s => ({ ...s, ask }))
-    if (e.command || e.text.trim().startsWith('/')) return
     const now = await $.clock.now()
+    const cmd = e.text.trim()
+    await set($, s => {
+      const name = skillCommand(cmd, (s.skills ?? []).map(k => k.name))
+      return { ...s, skillsSince: now, ...(name ? { skills: addSkill(s.skills, { name, at: now, via: 'command' }) } : {}) }
+    })
+    if (e.command || cmd.startsWith('/')) return
     const t = [...terms(e.text)]
     await set($, s => {
       if (!s.task) return { ...s, task: e.text.trim().split('\n')[0]!.slice(0, 80), taskAt: now, taskTerms: t, recent: [] }
@@ -241,7 +258,7 @@ export async function deckTurnDone($: EngineInterface, e: { agentId?: string }) 
 }
 
 /** A sub agent's step: counted on its own card, never in the main-session totals (see applyStep). */
-async function agentStep($: EngineInterface, e: { agentId?: string; model: string }, u: StepUsage | undefined) {
+async function agentStep($: EngineInterface, e: { agentId?: string; model: string; effort?: unknown }, u: StepUsage | undefined) {
   const now = await $.clock.now()
   // ask the engine for its task until the card has one (the list may not hold a just-spawned agent yet)
   const known = ((await read($, state_)).agents ?? []).some(a => a.id === e.agentId && a.task)
@@ -262,7 +279,7 @@ export async function deckMeasure($: EngineInterface, e: { context: DeckState['c
   const at = await $.clock.now()
   await quiet(() => set($, s => {
     const l = rl.find(r => /five|5h/i.test(r.kind))
-    return { ...s, ctx: e.context, limits: rl.map(r => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt })), ...addFive(s.fiveSeries, s.fiveAt, l?.percentUsed, l?.resetsAt, at) }
+    return { ...s, ctx: e.context, limits: keepLimits(s.limits, rl.map(r => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt })), at), ...addFive(s.fiveSeries, s.fiveAt, l?.percentUsed, l?.resetsAt, at) }
   }))
 }
 
@@ -281,6 +298,7 @@ export async function deckTool($: EngineInterface, e: { tool: string; agentId?: 
     const a = e as unknown as Record<string, unknown>
     const input = (a.input ?? a) as Record<string, unknown>
     const err = !!(r as { isError?: boolean }).isError
+    if (e.tool === 'Skill' && typeof input.skill === 'string' && input.skill) await set($, s => ({ ...s, skills: addSkill(s.skills, { name: String(input.skill), at: now, via: 'tool' }) }))
     const base = (p: unknown) => String(p ?? '').split('/').slice(-2).join('/')
     let f: Omit<FeedItem, 'at'> | undefined
     const tool = e.tool
@@ -296,7 +314,7 @@ export async function deckTool($: EngineInterface, e: { tool: string; agentId?: 
       if (TEST_RE.test(cmd)) {
         const m = TEST_RE.exec(cmd)![0]
         f = { kind: 'test', text: m, note: err ? 'failed' : 'passed', tone: err ? 'bad' : 'good' }
-      } else f = { kind: 'run', text: cmd.split('\n')[0]!.slice(0, 40), note: err ? 'exit≠0' : undefined, tone: err ? 'bad' : undefined }
+      } else f = { kind: 'run', text: cmd.split('\n')[0]!.slice(0, 40), note: err ? 'exit≠0' : COMMIT_RE.test(cmd) ? 'commit' : undefined, tone: err ? 'bad' : undefined }
     } else if (tool === 'TodoWrite' || tool === 'TaskCreate' || tool === 'TaskUpdate') {
       if (!err) await set($, s => ({ ...s, todos: applyTodo(s.todos ?? [], tool, input, JSON.stringify(r)) }))
     } else if (tool === 'Agent' || tool === 'Task') {
@@ -371,7 +389,7 @@ export async function deckTask($: EngineInterface, text: string): Promise<string
 }
 
 export async function deckReset($: EngineInterface): Promise<string> {
-  await set($, s => ({ ...blank(), ctx: s.ctx, limits: s.limits, fiveSeries: s.fiveSeries, fiveAt: s.fiveAt, cost: s.cost, startedAt: s.startedAt }))
+  await set($, s => ({ ...blank(), ctx: s.ctx, limits: s.limits, fiveSeries: s.fiveSeries, fiveAt: s.fiveAt, skills: s.skills, skillsSince: s.skillsSince, cost: s.cost, startedAt: s.startedAt }))
   return 'Deck reset.'
 }
 

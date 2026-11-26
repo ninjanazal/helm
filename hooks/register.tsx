@@ -1,10 +1,15 @@
-import { helmIsOn, deckCleared, deckMeasure, deckOpen, deckPrompt, deckStart, deckStep, deckTool, deckToolStart, deckTurnDone, registerDeck } from './deck'
+import { helmIsOn, deckCleared, deckData, deckMeasure, deckOpen, deckPrompt, deckStart, deckStep, deckTool, deckToolStart, deckTurnDone, registerDeck } from './deck'
 import type { Register } from 'claude-code'
 import { leanText, readLevel, LEAN_ID } from './lean'
 import { WORKLOAD_ID, workloadSection } from './workload'
 import { ADVISOR_ID, advisorSection } from './advisor'
+import { PIPELINE_ID, pipelineSection } from './pipeline'
 import { TESTING_ID, testingSection } from './testing'
+import { autoSkillText } from './autoskill'
+import { suggestSkills } from './deck-core'
 import { handleHelmTool, registerHelmTools, toolArgs } from './tools'
+
+const HELM_SECTIONS = new Set([LEAN_ID, WORKLOAD_ID, TESTING_ID, ADVISOR_ID, PIPELINE_ID])
 
 /**
  * helm's event wiring. The engine allows one unmatched hook per event per plugin, so the deck's handlers are
@@ -42,17 +47,21 @@ export const register: Register = (on, options) => {
     const workload = await workloadSection($)
     const testing = await testingSection($)
     const advisor = await advisorSection($)
-    const sections = r.sections.filter(s => s.id !== LEAN_ID && s.id !== WORKLOAD_ID && s.id !== TESTING_ID && s.id !== ADVISOR_ID)
+    const pipeline = await pipelineSection($)
+    const sections = r.sections.filter(s => !HELM_SECTIONS.has(s.id))
     if (lean) sections.push({ id: LEAN_ID, text: lean, scope: 'session' as const })
     if (workload) sections.push({ id: WORKLOAD_ID, text: workload, scope: 'session' as const })
     sections.push({ id: TESTING_ID, text: testing, scope: 'session' as const })
     sections.push({ id: ADVISOR_ID, text: advisor, scope: 'session' as const })
+    sections.push({ id: PIPELINE_ID, text: pipeline, scope: 'session' as const })
     return { sections }
   }).catch(($, e, next) => next(e))
 
   on('prompt.submit', async ($, e, next) => {
     await deckPrompt($, e)
-    return next(e)
+    let text = ''
+    try { text = helmIsOn() ? autoSkillText(suggestSkills(await deckData($), Date.now())) : '' } catch { /* display only */ }
+    return next(text ? { ...e, context: [...(e.context ?? []), text] } : e)
   }).catch(($, e, next) => next(e))
 
   on('turn.step', async function* ($, e, next) {

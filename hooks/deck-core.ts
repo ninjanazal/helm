@@ -4,6 +4,7 @@
  * runs the spinner turns and a light sweeps the rule of the sections where work flows; idle, nothing moves.
  */
 
+import { SKILL } from './pipeline'
 import type { DeckAgent, DeckCheck, DeckTodo } from '../types'
 
 /** A run of text: `c` its colour, `bg` a fill (the text then draws in `inverseText`), `b` bold, `d` dim. Theme names only. */
@@ -11,6 +12,8 @@ export type Seg = { t: string; c?: string; bg?: string; b?: boolean; d?: boolean
 export type Line = Seg[]
 
 export type FeedItem = { at: number; kind: 'find' | 'read' | 'edit' | 'run' | 'test' | 'topic' | 'note'; text: string; note?: string; tone?: 'good' | 'bad' | 'warn' | 'dim' }
+
+export type DeckSkill = { name: string; at: number; via: 'tool' | 'command' }
 
 export type DeckData = {
   task?: string
@@ -54,14 +57,78 @@ export type DeckData = {
   drift: Drift
   feed: FeedItem[]
   running: boolean
+  /** Skills used, newest last. */
+  skills?: DeckSkill[]
+  /** Time of the last prompt submit: a skill with at >= this is running while d.running. */
+  skillsSince?: number
   /** What the main session is doing now, for the task section's "now" row. */
   phase?: Phase
+  /** Repo set up by /setup-matt-pocock-skills. */
+  tracker?: boolean
 }
 
 export type Drift = { score: number; ctx: number; topic: number; turns: number }
 
 export const DRIFT_AT = 0.7
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+
+// ── skills ────────────────────────────────────────────────
+
+/** Add a used skill: an earlier entry of the same name goes, the last 4 are kept. */
+export function addSkill(list: DeckSkill[] | undefined, s: DeckSkill): DeckSkill[] {
+  return [...(list ?? []).filter(x => x.name !== s.name), s].slice(-4)
+}
+
+/** The skill a prompt like "/helm:prompt foo" runs. Plugin skills have a ':'; a bare name counts only when known. */
+export function skillCommand(text: string, known?: Iterable<string>): string | undefined {
+  const m = /^\s*\/([^\s/]+)/.exec(text)
+  if (!m) return undefined
+  const n = m[1]!
+  return n.includes(':') || (known && new Set(known).has(n)) ? n : undefined
+}
+
+/** Skills helm runs on its own (the model is told to invoke them), as against ones the person types.
+ *  tdd follows the testing level: off never suggests it, light suggests it without auto-running. */
+export const AUTO_SKILLS = new Set<string>([SKILL.verify, SKILL.diagnose, SKILL.review, SKILL.tdd, SKILL.writingPlans])
+
+/** Skills that fit what the session is doing now, in priority order, at most 3. Used skills are skipped. */
+export function suggestSkills(d: DeckData, now: number): { name: string; why: string; auto: boolean }[] {
+  const t0 = d.taskAt ?? -Infinity
+  const latest = (k: FeedItem['kind']) => d.feed.filter(f => f.kind === k && f.at >= t0).reduce<FeedItem | undefined>((a, f) => (!a || f.at >= a.at ? f : a), undefined)
+  const test = latest('test'), edit = latest('edit')
+  const since = d.cur?.at ?? now - 600_000
+  const used = new Set((d.skills ?? []).filter(s => now - s.at < 600_000).map(s => s.name))
+  const run = d.skills?.at(-1)
+  if (run && d.running && run.at >= (d.skillsSince ?? Infinity)) used.add(run.name)
+  const reviewed = d.skills?.some(s => s.name === SKILL.review && s.at > (edit?.at ?? t0))
+  const checksPass = test?.tone === 'good' && (d.changes?.files ?? 0) > 0
+  const usedSince = (n: string) => (d.skills ?? []).some(s => s.name === n && s.at >= t0)
+  const grilledSinceTask = (d.skills ?? []).some(s => [SKILL.grilling, SKILL.grillMe].includes(s.name) && s.at >= t0)
+  const committed = d.feed.some(f => f.kind === 'run' && f.at >= t0 && f.note === 'commit')
+  const ctxPct = d.ctx ? (d.ctx.percent ?? (d.ctx.tokens ? (100 * d.ctx.tokens) / d.ctx.window : 0)) : 0
+  const cands: [boolean, string, string][] = [
+    [test?.tone === 'bad', SKILL.diagnose, 'tests failing'],
+    [d.feed.filter(f => f.kind === 'run' && f.note === 'exit≠0' && f.at >= since && f.at >= t0).length >= 2, SKILL.diagnose, 'commands failing'],
+    [ctxPct >= 80, SKILL.handoff, 'context near full'],
+    [!!edit && (!test || edit.at > test.at), SKILL.verify, 'edited, not verified'],
+    [checksPass && !reviewed, SKILL.review, 'checks pass, unreviewed'],
+    [checksPass && !!reviewed, SKILL.commit, 'checks pass, uncommitted'],
+    [!!d.tracker && grilledSinceTask && !edit && !usedSince(SKILL.toSpec), SKILL.toSpec, 'grilled, no spec yet'],
+    [!!d.task && !edit && !(d.skills ?? []).some(s => s.at >= t0), SKILL.grillMe, 'new task, not grilled'],
+    [grilledSinceTask && !d.tracker && !edit && !usedSince(SKILL.writingPlans), SKILL.writingPlans, 'grilled, no plan yet'],
+    [d.testing !== 'off' && !!edit && !test, SKILL.tdd, 'building, no test yet'],
+    [committed, SKILL.pr, 'committed, no PR body'],
+  ]
+  const out: { name: string; why: string; auto: boolean }[] = []
+  const anchor = Math.max(edit?.at ?? -Infinity, test?.at ?? -Infinity, t0)
+  const isAuto = (name: string) => AUTO_SKILLS.has(name) && !(name === SKILL.tdd && d.testing === 'light')
+  for (const [ok, name, why] of cands) {
+    const ranSince = isAuto(name) && (d.skills ?? []).some(s => s.name === name && s.at >= anchor)
+    if (ok && !used.has(name) && !ranSince && !out.some(o => o.name === name)) out.push({ name, why, auto: isAuto(name) })
+    if (out.length === 3) break
+  }
+  return out
+}
 
 // ── numbers ───────────────────────────────────────────────
 
@@ -88,6 +155,16 @@ function resetMs(r: string | number | undefined): number | undefined {
   if (r === undefined) return undefined
   const v = typeof r === 'number' ? (r < 1e12 ? r * 1000 : r) : Date.parse(r)
   return Number.isFinite(v) ? v : undefined
+}
+
+/** The new limits by kind; a kind missing from this update keeps its last value until its reset passes. */
+export function keepLimits(prev: DeckData['limits'] | undefined, next: DeckData['limits'], now: number): DeckData['limits'] {
+  const kept = (prev ?? []).filter(p => {
+    if (next.some(n => n.kind === p.kind)) return false
+    const r = resetMs(p.resetsAt)
+    return r === undefined || r > now
+  })
+  return [...next, ...kept]
 }
 
 export const SERIES_CAP = 120
@@ -366,14 +443,21 @@ function flow(items: Line[], w: number, sep?: string): Line[] {
   return rows
 }
 
-/** One sub agent on one row: status, type · task, then tokens and clock; a finished one is one dim line. */
+/** A sub agent's type as a short tag: 'general-purpose' reads 'general'. */
+export function agentTag(type?: string): string {
+  return type === 'general-purpose' ? 'general' : type ?? ''
+}
+
+/** One sub agent on one row: status, task, then tag · model·effort · tokens (and the clock while running); the task clips first. */
 function agentRow(a: DeckAgent, w: number, frame: number, running: boolean, now: number): Line {
-  const label: Line = [...(a.type ? [{ t: a.type, b: true }, { t: ' · ', d: true }] : []), { t: a.task || 'agent', d: true }]
-  if (a.endedAt !== undefined) return [{ t: '✔', c: 'success' }, { t: ' ' }, { t: `${a.type ? a.type + ' · ' : ''}${a.task || 'agent'} · ${fmtTok(a.tokens)}`, d: true }]
-  const icon: Seg = running ? { t: SPIN[frame % SPIN.length]!, c: 'claude', b: true } : { t: '○', c: 'subtle' }
-  const stats: Line = [{ t: fmtTok(a.tokens), b: true }, { t: ' ' + clock(now - a.startedAt), d: true }]
-  const room = Math.max(4, w - 2 - len(stats) - 2)
-  return [icon, { t: ' ' }, ...padTo(clip(label, room), room), { t: '  ' }, ...stats]
+  const done = a.endedAt !== undefined
+  const tag = agentTag(a.type)
+  const parts = [tag, a.model ? a.model + (a.effort ? '·' + a.effort : '') : ''].filter(Boolean)
+  const rest: Line = [...parts.flatMap(p => [{ t: ' · ', d: true }, { t: p, d: true }]), { t: ' · ', d: true }, { t: fmtTok(a.tokens), d: true, ...(done ? {} : { b: true }) }]
+  if (!done) rest.push({ t: ' ' + clock(now - a.startedAt), d: true })
+  const icon: Seg = done ? { t: '✔', c: 'success' } : running ? { t: SPIN[frame % SPIN.length]!, c: 'claude', b: true } : { t: '○', c: 'subtle' }
+  const room = Math.max(4, w - 2 - len(rest) - 1)
+  return [icon, { t: ' ' }, ...clip([{ t: a.task || 'agent', b: true }], room), ...rest]
 }
 
 const MAX_AGENT_ROWS = 4
@@ -463,6 +547,20 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
     ...(hi ? [[{ t: narrow ? '→ start fresh' : '→ start a fresh session  ·  /helm:prompt to start the next task', c: 'error', b: true }]] : []),
   ])
 
+  // skills: the one running, a suggestion, then the last used
+  {
+    const sk = d.skills ?? []
+    const newest = sk.at(-1)
+    const running = !!newest && d.running && newest.at >= (d.skillsSince ?? Infinity)
+    const rows: Line[] = []
+    if (running) rows.push([{ t: '▸ ', c: 'claude' }, { t: newest!.name, c: 'claude', b: true }])
+    for (const sug of suggestSkills(d, now)) rows.push(sug.auto
+      ? [{ t: '⚡ ', c: 'success' }, { t: sug.name, c: 'success', b: true }, { t: ' · auto · ' + sug.why, d: true }]
+      : [{ t: '→ ', c: 'suggestion' }, { t: sug.name, c: 'suggestion', b: true }, { t: ' · ' + sug.why, d: true }])
+    for (const s of sk.slice(0, running ? -1 : undefined).slice(-3).reverse()) rows.push([{ t: `${s.name} · ${fmtDur(Math.max(0, now - s.at))}`, d: true }])
+    if (rows.length) sec('skills', '✦ SKILLS', running ? 'claude' : 'suggestion', rows)
+  }
+
   // usage: context, the 5h meter and its chart, the week meter, then cost and tokens
   const body: Line[] = []
   if (d.ctx) {
@@ -484,8 +582,19 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   const week = d.limits.find(l => /seven|week|7d/i.test(l.kind))
   if (week) limit('week', week)
   const tk = tokenSplit(d.tokens)
-  const tail = [d.cost !== undefined ? `$${d.cost.toFixed(2)}` : '', tk.total > 0 ? [`in ${fmtTok(tk.in)}`, `out ${fmtTok(tk.out)}`].join(narrow ? ' ' : ' · ') : ''].filter(Boolean)
-  if (tail.length) body.push([{ t: tail.join(' · '), d: true }])
+  const sep: Seg = { t: narrow ? ' ' : '  ·  ', d: true }
+  const tail: Line[] = []
+  if (d.cost !== undefined) tail.push([{ t: `$${d.cost.toFixed(2)}`, b: true }])
+  if (tk.total > 0) tail.push(narrow
+    ? [{ t: '↓', c: 'suggestion' }, { t: fmtTok(tk.in) }, { t: ' ' }, { t: '↑', c: 'suggestion' }, { t: fmtTok(tk.out) }]
+    : [{ t: '↓ ', c: 'suggestion' }, { t: fmtTok(tk.in) }, { t: ' in', d: true }, sep, { t: '↑ ', c: 'suggestion' }, { t: fmtTok(tk.out) }, { t: ' out', d: true }])
+  if ((d.delegated ?? 0) > 0) tail.push(narrow
+    ? [{ t: '⌁', c: 'claude' }, { t: fmtTok(d.delegated!) }]
+    : [{ t: '⌁ ', c: 'claude' }, { t: fmtTok(d.delegated!) }, { t: ' agents', d: true }])
+  if (tail.length) {
+    const line: Line = tail.flatMap((l, i) => (i ? [sep, ...l] : l))
+    body.push([{ t: ' '.repeat(Math.max(0, ((w - 1) - len(line)) >> 1)) }, ...line])
+  }
   if (body.length) sec('usage', '◷ USAGE', 'suggestion', body)
 
   // agents: only while the session has sub agents; running first, then the most recent finished
@@ -495,8 +604,9 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
     const sorted = [...running, ...ag.filter(a => a.endedAt !== undefined).reverse()]
     const shown = sorted.slice(0, MAX_AGENT_ROWS)
     const rows = shown.map(a => agentRow(a, w, frame, d.running, now))
-    if (sorted.length > shown.length) rows.push([{ t: `+${sorted.length - shown.length} more`, d: true }])
-    const meta = [running.length ? `${running.length} running` : '', fmtTok(ag.reduce((n, a) => n + a.tokens, 0))].filter(Boolean).join(' · ')
+    const total = d.delegated ?? ag.reduce((n, a) => n + a.tokens, 0)
+    if (sorted.length > shown.length) rows.push([{ t: `+${sorted.length - shown.length} more · ${fmtTok(Math.max(0, total - shown.reduce((n, a) => n + a.tokens, 0)))}`, d: true }])
+    const meta = [running.length ? `${running.length} running` : '', `${fmtTok(total)} total`].filter(Boolean).join(' · ')
     sec('agents', '⌁ AGENTS', 'claude', rows, running.length > 0, meta)
   }
 
@@ -542,11 +652,11 @@ export const AGENTS_KEPT = 6
  * A sub agent's model step, added to its own card (created on its first step, with the task and type the engine
  * lists for it). Tokens are input + cache writes + output, as the main totals count them.
  */
-export function agentStep(list: DeckAgent[], id: string, x: { model: string; tokens: number; now: number; task?: string; type?: string }): DeckAgent[] {
+export function agentStep(list: DeckAgent[], id: string, x: { model: string; tokens: number; now: number; task?: string; type?: string; effort?: string }): DeckAgent[] {
   const model = x.model.replace(/^claude-/, '').replace(/-\d{8}$/, '')
   const i = list.findIndex(a => a.id === id)
-  if (i < 0) return [...list, { id, task: x.task ?? '', type: x.type, model, tokens: x.tokens, steps: 1, startedAt: x.now }].slice(-AGENTS_KEPT)
-  return list.map((a, k) => (k === i ? { ...a, model, tokens: a.tokens + x.tokens, steps: a.steps + 1, task: a.task || x.task || '', type: a.type ?? x.type } : a))
+  if (i < 0) return [...list, { id, task: x.task ?? '', type: x.type, model, effort: x.effort, tokens: x.tokens, steps: 1, startedAt: x.now }].slice(-AGENTS_KEPT)
+  return list.map((a, k) => (k === i ? { ...a, model, effort: x.effort ?? a.effort, tokens: a.tokens + x.tokens, steps: a.steps + 1, task: a.task || x.task || '', type: a.type ?? x.type } : a))
 }
 
 export type StepUsage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
@@ -559,7 +669,7 @@ type StepState = { tokens: DeckData['tokens']; agents?: DeckAgent[]; model?: str
 export function applyStep<S extends StepState>(s: S, e: { agentId?: string; model: string; effort?: unknown }, u: StepUsage | undefined, now: number, info?: { task?: string; type?: string }): S {
   if (e.agentId) {
     const tokens = u ? u.input_tokens + u.cache_creation_input_tokens + u.output_tokens : 0
-    return { ...s, delegated: (s.delegated ?? 0) + tokens, agents: agentStep(s.agents ?? [], e.agentId, { model: e.model, tokens, now, ...info }) }
+    return { ...s, delegated: (s.delegated ?? 0) + tokens, agents: agentStep(s.agents ?? [], e.agentId, { model: e.model, tokens, now, effort: e.effort === undefined ? undefined : String(e.effort), ...info }) }
   }
   return {
     ...s,
@@ -593,6 +703,8 @@ export const PANE_FRAME_MS = 120
 
 // ── pipeline: you → model → tools, drawn in the pane's free rows ──
 
+/** A new `git commit` anywhere in a command, not an amend. */
+export const COMMIT_RE = /\bgit\s+commit\b(?![^\n;&|]*--amend)/
 export const TEST_RE = /\b(make (test|check)|npm (run )?test|pnpm test|yarn test|bun test|cargo test|pytest|go test|claude plugin test)\b/
 
 /** What the session is doing: the model writing, a tool running, a dialog waiting on the person, or nothing. */
@@ -659,7 +771,7 @@ const FEED_TONE: Record<string, string> = { good: 'success', bad: 'error', warn:
 export function live(d: Pick<DeckData, 'feed' | 'agents' | 'running'>, w: number, rows: number, frame: number, now: number): Line[] {
   if (rows < 3) return []
   const out: Line[] = []
-  for (const a of (d.agents ?? []).filter(a => a.endedAt === undefined)) out.push([{ t: 'now'.padStart(AGE_W), c: 'claude' }, { t: ' │ ', c: 'subtle' }, { t: '⌁ ', c: 'claude', b: true }, { t: marquee(`${a.type ?? 'agent'} · ${a.task}`, Math.max(4, w - AGE_W - 6), frame, d.running), c: 'claude' }])
+  for (const a of (d.agents ?? []).filter(a => a.endedAt === undefined)) out.push([{ t: 'now'.padStart(AGE_W), c: 'claude' }, { t: ' │ ', c: 'subtle' }, { t: '⌁ ', c: 'claude', b: true }, { t: marquee(`${a.task || 'agent'}${agentTag(a.type) ? ' · ' + agentTag(a.type) : ''}`, Math.max(4, w - AGE_W - 6), frame, d.running), c: 'claude' }])
   for (const f of [...d.feed].reverse()) {
     const age = fmtDur(Math.max(0, now - f.at)).split(' ')[0]!
     const text = f.note ? `${f.text} ${f.note}` : f.text

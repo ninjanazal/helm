@@ -15,6 +15,11 @@ test('workload: modes parse, off has no text, always differs from sometimes, hai
   for (const m of ['always', 'sometimes'] as const) {
     for (const w of ['model and effort', 'approve', 'haiku', 'sonnet']) expect(workloadText(m)).toContain(w)
   }
+  for (const m of ['always', 'sometimes'] as const) {
+    expect(workloadText(m)).toContain('never above')
+    expect(workloadText(m)).toContain('cheaper')
+    expect(workloadText(m)).not.toContain('sonnet (effort medium)')
+  }
   expect(workloadText('always')).not.toContain('do the unit yourself')
   expect(workloadText('always')).not.toContain('after the plan is settled')
 })

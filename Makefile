@@ -20,16 +20,16 @@ LEGACY := local global unlocal unglobal doctor install plugin plugin-remove supe
 
 local:
 	$(call now,setup)
-	@SCOPE=local PIECES='helm superpowers' $(HELM) setup
+	@SCOPE=local PIECES='helm superpowers mattpocock' $(HELM) setup
 global:
 	$(call now,setup)
-	@SCOPE=user PIECES='helm superpowers' $(HELM) setup
+	@SCOPE=user PIECES='helm superpowers mattpocock' $(HELM) setup
 unlocal:
 	$(call now,remove)
-	@SCOPE=local PIECES='helm superpowers' HELM_YES=1 $(HELM) remove
+	@SCOPE=local PIECES='helm superpowers mattpocock' HELM_YES=1 $(HELM) remove
 unglobal:
 	$(call now,remove)
-	@SCOPE=user PIECES='helm superpowers' HELM_YES=1 $(HELM) remove
+	@SCOPE=user PIECES='helm superpowers mattpocock' HELM_YES=1 $(HELM) remove
 doctor:
 	$(call now,status)
 	@$(HELM) status

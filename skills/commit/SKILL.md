@@ -12,7 +12,7 @@ Running this skill is the person's request to commit. Do not commit at any other
 - `git status --short` and `git diff --cached`.
 - Nothing staged: show the changed files in one short list and ask in one line whether to stage all of them or which ones. Stage only what they say. Never stage files that likely hold secrets (`.env`, credentials, keys); name them and skip them.
 - Read `git log --oneline -10` to match the repo's scopes and wording.
-- If superpowers is installed, follow its verification-before-completion skill before committing.
+- If superpowers is installed, follow its verification-before-completion skill before committing, and, if mattpocock-skills is installed, run mattpocock-skills:code-review first.
 
 ## 2. Write the message
 ```

@@ -1,9 +1,9 @@
 {
   "name": "helm",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Steer Claude Code sessions: a live deck pane and a prompt builder.",
   "license": "MIT",
-  "dependencies": ["superpowers@claude-plugins-official"],
+  "dependencies": ["superpowers@claude-plugins-official", "mattpocock-skills@claude-plugins-official"],
   "types": "./types/index.d.ts",
   "author": {
     "name": "Eurico Martins"
