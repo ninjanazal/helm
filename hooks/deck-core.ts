@@ -87,7 +87,8 @@ export function skillCommand(text: string, known?: Iterable<string>): string | u
   return n.includes(':') || (known && new Set(known).has(n)) ? n : undefined
 }
 
-/** Skills helm runs on its own (the model is told to invoke them), as against ones the person types. */
+/** Skills helm runs on its own (the model is told to invoke them), as against ones the person types.
+ *  tdd follows the testing level: off never suggests it, light suggests it without auto-running. */
 export const AUTO_SKILLS = new Set<string>([SKILL.verify, SKILL.diagnose, SKILL.review, SKILL.tdd, SKILL.writingPlans])
 
 /** Skills that fit what the session is doing now, in priority order, at most 3. Used skills are skipped. */
@@ -115,14 +116,15 @@ export function suggestSkills(d: DeckData, now: number): { name: string; why: st
     [!!d.tracker && grilledSinceTask && !edit && !usedSince(SKILL.toSpec), SKILL.toSpec, 'grilled, no spec yet'],
     [!!d.task && !edit && !(d.skills ?? []).some(s => s.at >= t0), SKILL.grillMe, 'new task, not grilled'],
     [grilledSinceTask && !d.tracker && !edit && !usedSince(SKILL.writingPlans), SKILL.writingPlans, 'grilled, no plan yet'],
-    [!!edit && !test, SKILL.tdd, 'building, no test yet'],
+    [d.testing !== 'off' && !!edit && !test, SKILL.tdd, 'building, no test yet'],
     [committed, SKILL.pr, 'committed, no PR body'],
   ]
   const out: { name: string; why: string; auto: boolean }[] = []
   const anchor = Math.max(edit?.at ?? -Infinity, test?.at ?? -Infinity, t0)
+  const isAuto = (name: string) => AUTO_SKILLS.has(name) && !(name === SKILL.tdd && d.testing === 'light')
   for (const [ok, name, why] of cands) {
-    const ranSince = AUTO_SKILLS.has(name) && (d.skills ?? []).some(s => s.name === name && s.at >= anchor)
-    if (ok && !used.has(name) && !ranSince && !out.some(o => o.name === name)) out.push({ name, why, auto: AUTO_SKILLS.has(name) })
+    const ranSince = isAuto(name) && (d.skills ?? []).some(s => s.name === name && s.at >= anchor)
+    if (ok && !used.has(name) && !ranSince && !out.some(o => o.name === name)) out.push({ name, why, auto: isAuto(name) })
     if (out.length === 3) break
   }
   return out

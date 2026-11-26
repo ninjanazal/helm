@@ -12,6 +12,7 @@ test('pipeline: tracker picks to-spec or writing-plans, design always routes to 
   for (const t of [on, off]) {
     expect(t).toContain('mattpocock-skills:grilling')
     expect(t).toContain('in place of superpowers:brainstorming')
+    expect(t).toContain('Never push or open a pull request')
   }
   const fake = (files: string[]) => ({ fs: { read: async (p: string) => { if (!files.includes(p)) throw new Error('ENOENT'); return '' } } }) as never
   expect(await trackerReady(fake([]), '/p')).toBe(false)

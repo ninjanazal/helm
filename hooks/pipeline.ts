@@ -29,7 +29,7 @@ export function pipelineText(tracker: boolean): string {
     `- Bug or failing test: ${SKILL.diagnose} (in place of superpowers:systematic-debugging).`,
     `- Before done: ${SKILL.verify}.`,
     `- Review: ${SKILL.review} (in place of superpowers:requesting-code-review). Always the qualified name, never bare \`code-review\`.`,
-    `- Ship: ${SKILL.commit}, then ${SKILL.pr} for the PR body.`,
+    `- Ship: ${SKILL.commit}, then ${SKILL.pr} for the PR body. Never push or open a pull request: that is the person's job; hand them the PR body.`,
     `- Context near full: tell the person to run /${SKILL.handoff}.`,
     '- Fallback: if a named mattpocock-skills skill is not in your skill list, use the superpowers skill it replaces; design falls back to brainstorming.'].join('\n')
 }

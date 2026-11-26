@@ -666,6 +666,13 @@ test('suggestSkills: new rules, priority, cap of 3, auto flags', () => {
   expect([...AUTO_SKILLS].sort()).toEqual(['mattpocock-skills:code-review', 'mattpocock-skills:diagnosing-bugs', 'mattpocock-skills:tdd', 'superpowers:verification-before-completion', 'superpowers:writing-plans'])
 })
 
+test('suggestSkills: the testing level gates tdd', () => {
+  const tdd = (testing?: 'off' | 'light' | 'thorough') => suggestSkills(sg({ feed: [E(5)], testing }), NOW).find(r => r.name === 'mattpocock-skills:tdd')
+  expect(tdd('off')).toBeUndefined()
+  expect(tdd('light')?.auto).toBe(false)
+  expect(tdd('thorough')?.auto).toBe(true)
+})
+
 test('suggestSkills: an auto skill that ran since the latest edit is not suggested again', () => {
   const V = 'superpowers:verification-before-completion'
   const sk = (at: number) => ({ name: V, at, via: 'tool' as const })
