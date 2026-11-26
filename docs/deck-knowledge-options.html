@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>helm deck: knowledge strip options</title>
+<style>
+  :root { --bg:#e9e9ec; --pane:#f4f4f4; --line:#d6d6da; --text:#2a2a2e; --dim:#77777f;
+    --claude:#c8623f; --success:#2e7d3e; --warning:#9a7221; --error:#c0392b; --suggestion:#5462d6; --subtle:#b0b0b6; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, sans-serif; padding:24px; }
+  header { max-width:1240px; margin:0 auto 20px; display:flex; flex-wrap:wrap; gap:12px 24px; align-items:end; justify-content:space-between; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  header p { margin:0; color:var(--dim); max-width:680px; }
+  .ctl { display:flex; gap:8px; }
+  button { background:var(--pane); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+  button[aria-pressed="true"] { border-color:var(--claude); color:var(--claude); }
+  main { max-width:1240px; margin:0 auto; display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 390px), 1fr)); gap:16px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 16px 16px; }
+  .card h2 { font-size:15px; margin:0 0 2px; } .card h2 .n { color:var(--claude); margin-right:6px; }
+  .card p { margin:0 0 10px; color:var(--dim); font-size:13px; }
+  .pane { background:var(--pane); border-radius:6px; padding:10px 6px; font:13px/1.55 ui-monospace, "DejaVu Sans Mono", monospace; white-space:pre; text-align:center; overflow:hidden; }
+  .s { color:var(--subtle); } .d { color:var(--dim); } .w { color:var(--warning); } .g { color:var(--success); } .u { color:var(--suggestion); } .c { color:var(--claude); }
+  .cell { background:var(--subtle); color:#fff; font-weight:700; padding:0 6px; }
+  .read { background:var(--suggestion); color:#fff; font-weight:700; padding:0 6px; }
+  .write { background:var(--warning); color:#fff; font-weight:700; padding:0 6px; }
+  .pick { margin-top:10px; font-size:13px; color:var(--dim); }
+  .card.chosen { border-color:var(--claude); box-shadow:0 0 0 2px var(--claude) inset; }
+  footer { max-width:1240px; margin:20px auto 0; color:var(--dim); }
+  footer b { color:var(--claude); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Knowledge strip: 6 options</h1>
+    <p>Today it shows <code>0 entries · 18 B · 0% covered</code>, which says little and ignores the new CSV tables. Switch the state, click a card to mark your pick, then tell me its number (or mix them, e.g. "4 + 5").</p>
+  </div>
+  <div class="ctl" role="group" aria-label="State">
+    <button data-s="full" aria-pressed="true">Populated</button>
+    <button data-s="empty" aria-pressed="false">Empty</button>
+    <button data-s="read" aria-pressed="false">Just read</button>
+  </div>
+</header>
+<main id="m"></main>
+<footer>Your pick: <b id="pick">none yet</b></footer>
+<script>
+const opts = [
+  { t: 'Current (baseline)', p: 'Two rows: read · knowledge · write cells, then counts.',
+    full: `<span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span> <span class="cell">  knowledge  </span> <span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span>\n<span class="d">12 entries · 3.1 KB · 82% covered</span>`,
+    empty: `<span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span> <span class="cell">  knowledge  </span> <span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span>\n<span class="d">0 entries · 18 B · 0% covered</span>`,
+    read: `<span class="read">    read    </span> <span class="cell">  knowledge  </span> <span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span>\n<span class="d">12 entries · 3.1 KB · 82% covered</span>` },
+  { t: 'Counts by kind', p: 'Same shape; the label counts topics, terms and tables instead of bytes.',
+    full: `<span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span> <span class="cell">  knowledge  </span> <span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span>\n<span class="d">12 topics · 8 terms · 3 tables · 82%</span>`,
+    empty: `<span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span> <span class="cell">  knowledge  </span> <span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span>\n<span class="d">0 topics · 0 terms · 0 tables</span>`,
+    read: `<span class="read">    read    </span> <span class="cell">  knowledge  </span> <span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span>\n<span class="d">12 topics · 8 terms · 3 tables · 82%</span>` },
+  { t: 'Coverage bar', p: 'Coverage becomes a filled bar; counts shrink to the side.',
+    full: `<span class="cell"> knowledge </span> <span class="g">▰▰▰▰▰▰▰▰▰▰▰▰▰</span><span class="s">▱▱▱</span> <span class="d">82%</span>\n<span class="d">12 topics · 3 tables · 2 stale</span>`,
+    empty: `<span class="cell"> knowledge </span> <span class="s">▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱</span> <span class="d">0%</span>\n<span class="d">0 topics · 0 tables</span>`,
+    read: `<span class="read"> knowledge </span> <span class="g">▰▰▰▰▰▰▰▰▰▰▰▰▰</span><span class="s">▱▱▱</span> <span class="d">82%</span>\n<span class="d">12 topics · 3 tables · 2 stale</span>` },
+  { t: 'One row', p: 'Everything on one line; frees a row for the live list.',
+    full: `<span class="cell">≡ know</span> <span class="d">12 topics · 3 tables · 82%</span> <span class="w">· 2 stale</span>`,
+    empty: `<span class="cell">≡ know</span> <span class="d">empty</span>`,
+    read: `<span class="read">≡ know</span> <span class="d">12 topics · 3 tables · 82%</span> <span class="w">· 2 stale</span>` },
+  { t: 'Empty state that says what to do', p: 'Populated looks like option 2; when empty, a hint replaces the zeros.',
+    full: `<span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span> <span class="cell">  knowledge  </span> <span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span>\n<span class="d">12 topics · 8 terms · 3 tables · 82%</span>`,
+    empty: `<span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span> <span class="cell">  knowledge  </span> <span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span>\n<span class="w">empty · run /helm:map</span>`,
+    read: `<span class="read">    read    </span> <span class="cell">  knowledge  </span> <span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span>\n<span class="d">12 topics · 8 terms · 3 tables · 82%</span>` },
+  { t: 'Shows what was looked up', p: 'After a read or write, row 2 names it for 2 s (topic, term or table query), then falls back to counts.',
+    full: `<span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span> <span class="cell">  knowledge  </span> <span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span>\n<span class="d">12 topics · 8 terms · 3 tables · 82%</span>`,
+    empty: `<span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span> <span class="cell">  knowledge  </span> <span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span>\n<span class="w">empty · run /helm:map</span>`,
+    read: `<span class="read">    read    </span> <span class="cell">  knowledge  </span> <span class="s">▱▱▱▱▱▱▱▱▱▱▱▱</span>\n<span class="u">↳ people where city=porto · 1 row</span>` },
+]
+let state = 'full', chosen = null
+const m = document.getElementById('m')
+function draw() {
+  m.innerHTML = opts.map((o, i) => `<div class="card${chosen === i ? ' chosen' : ''}" data-i="${i}"><h2><span class="n">${i + 1}</span>${o.t}</h2><p>${o.p}</p><div class="pane">${o[state]}</div><div class="pick">${chosen === i ? '✓ picked' : 'click to pick'}</div></div>`).join('')
+}
+m.addEventListener('click', e => { const c = e.target.closest('.card'); if (!c) return; chosen = +c.dataset.i; document.getElementById('pick').textContent = `${chosen + 1}. ${opts[chosen].t}`; draw() })
+document.querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', () => { state = b.dataset.s; document.querySelectorAll('[data-s]').forEach(x => x.setAttribute('aria-pressed', x === b)); draw() }))
+draw()
+</script>
+</body>
+</html>

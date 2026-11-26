@@ -760,27 +760,24 @@ export function pipeline(p: Phase, frame: number, w: number, rows: number, turnT
 }
 
 /** The knowledge strip's height in rows, and how long a lit cell stays lit. */
-export const KNOW_ROWS = 2
+export const KNOW_ROWS = 1
 export const KNOW_LIT_MS = 2000
-const fmtBytes = (b: number) => (b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} KB`)
 
 /**
- * Two rows, centred, under the pipeline: `read` · `knowledge` · `write` as three cells (the middle one always dim-filled;
- * the read or write cell lit for 2000 ms after a knowledge read or write), then `N entries · size · P% covered` and
- * ` · K stale` when some. None without stats or when it does not fit.
+ * One row, centred, under the pipeline: a bold `≡ know` cell (dim-filled; lit `suggestion` for 2000 ms after a knowledge
+ * read, `warning` after a write) then `N topics · T tables · P%` dim (tables omitted at 0, just `empty` with nothing)
+ * and ` · K stale` in warning when some. None without stats or when it does not fit.
  */
 export type KnowView = { stats?: KnowStats; op?: 'read' | 'write'; at?: number }
 export function knowStrip(k: KnowView, now: number, w: number, rows: number): Line[] {
   if (!k.stats || rows < KNOW_ROWS || w < PIPE_W) return []
-  const n = Math.min(14, Math.floor((w - 2) / 3))
   const lit = k.op && k.at !== undefined && now - k.at < KNOW_LIT_MS ? k.op : undefined
-  const cell = (s: string) => { const t = [...s].slice(0, n); const l = (n - t.length) >> 1; return ' '.repeat(l) + t.join('') + ' '.repeat(n - t.length - l) }
-  const third = (name: string, op?: 'read' | 'write'): Seg => (op && op === lit ? { t: cell(name), bg: op === 'read' ? 'suggestion' : 'warning', b: true } : op ? { t: '▱'.repeat(n), c: 'subtle' } : { t: cell(name), bg: 'subtle', b: true })
-  const barRow: Line = [third('read', 'read'), { t: ' ' }, third('knowledge'), { t: ' ' }, third('write', 'write')]
-  const { entries, bytes, coverage, stale } = k.stats
-  const label: Line = [{ t: `${entries} entries · ${fmtBytes(bytes)} · ${coverage}% covered`, d: true }, ...(stale > 0 ? [{ t: ` · ${stale} stale`, c: 'warning' }] : [])]
-  const centre = (l: Line): Line => { const c = clip(l, w); const pad = (w - len(c)) >> 1; return pad > 0 ? [{ t: ' '.repeat(pad) }, ...c] : c }
-  return [centre(barRow), centre(label)]
+  const { entries, coverage, stale } = k.stats
+  const tables = k.stats.tables ?? 0
+  const text = entries === 0 && tables === 0 ? ' empty' : ` ${entries} topics${tables > 0 ? ` · ${tables} tables` : ''} · ${coverage}%`
+  const row: Line = [{ t: ' ≡ know ', bg: lit === 'read' ? 'suggestion' : lit === 'write' ? 'warning' : 'subtle', b: true }, { t: text, d: true }, ...(stale > 0 ? [{ t: ` · ${stale} stale`, c: 'warning' }] : [])]
+  const c = clip(row, w); const pad = (w - len(c)) >> 1
+  return [pad > 0 ? [{ t: ' '.repeat(pad) }, ...c] : c]
 }
 
 const FEED_ICON: Record<FeedItem['kind'], string> = { find: '⌕', read: '≡', edit: '✎', run: '›', test: '✔', topic: '↯', note: '·' }

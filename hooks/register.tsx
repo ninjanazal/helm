@@ -6,11 +6,12 @@ import { ADVISOR_ID, advisorSection } from './advisor'
 import { PIPELINE_ID, pipelineSection } from './pipeline'
 import { TESTING_ID, testingSection } from './testing'
 import { KNOWLEDGE_ID, knowledgeSection } from './knowledge'
+import { TABLES_ID, tablesSection } from './tables'
 import { autoSkillText } from './autoskill'
 import { suggestSkills } from './deck-core'
 import { handleHelmTool, registerHelmTools, toolArgs } from './tools'
 
-const HELM_SECTIONS = new Set([LEAN_ID, WORKLOAD_ID, TESTING_ID, ADVISOR_ID, PIPELINE_ID, KNOWLEDGE_ID])
+const HELM_SECTIONS = new Set([LEAN_ID, WORKLOAD_ID, TESTING_ID, ADVISOR_ID, PIPELINE_ID, KNOWLEDGE_ID, TABLES_ID])
 
 /**
  * helm's event wiring. The engine allows one unmatched hook per event per plugin, so the deck's handlers are
@@ -50,6 +51,7 @@ export const register: Register = (on, options) => {
     const advisor = await advisorSection($)
     const pipeline = await pipelineSection($)
     const knowledge = await knowledgeSection($).catch(() => '')
+    const tables = await tablesSection($).catch(() => '')
     const sections = r.sections.filter(s => !HELM_SECTIONS.has(s.id))
     if (lean) sections.push({ id: LEAN_ID, text: lean, scope: 'session' as const })
     if (workload) sections.push({ id: WORKLOAD_ID, text: workload, scope: 'session' as const })
@@ -57,6 +59,7 @@ export const register: Register = (on, options) => {
     sections.push({ id: ADVISOR_ID, text: advisor, scope: 'session' as const })
     sections.push({ id: PIPELINE_ID, text: pipeline, scope: 'session' as const })
     if (knowledge) sections.push({ id: KNOWLEDGE_ID, text: knowledge, scope: 'session' as const })
+    if (tables) sections.push({ id: TABLES_ID, text: tables, scope: 'session' as const })
     return { sections }
   }).catch(($, e, next) => next(e))
 

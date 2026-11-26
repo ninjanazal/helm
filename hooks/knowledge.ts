@@ -1,4 +1,5 @@
 import type { EngineInterface } from 'claude-code'
+import { TABLES_DIR } from './tables'
 
 /**
  * Knowledge store: a small index of where things live (topic -> paths + note) kept in .claude/helm/knowledge/,
@@ -7,7 +8,7 @@ import type { EngineInterface } from 'claude-code'
  */
 
 export type Entry = { topic: string; paths: string[]; note: string }
-export type KnowStats = { entries: number; bytes: number; coverage: number; stale: number; last?: { op: 'read' | 'write'; at: number } }
+export type KnowStats = { entries: number; bytes: number; coverage: number; stale: number; tables?: number; last?: { op: 'read' | 'write'; at: number } }
 
 export const KNOW_READ = ['status', 'stale'] as const
 export const KNOW_WRITE = ['add', 'remove', 'vision', 'term'] as const
@@ -181,6 +182,14 @@ export async function knowledgeSection($: EngineInterface): Promise<string> {
   return [...RULES, capIndex(formatIndex(live)).trimEnd()].filter(Boolean).join('\n')
 }
 
+async function countTables($: EngineInterface, root: string): Promise<number> {
+  try {
+    const l = (await Promise.resolve($.fs.list(`${root}/${TABLES_DIR}`))) as unknown[]
+    return (Array.isArray(l) ? l : []).map(e => (typeof e === 'string' ? e : (e as { name?: unknown } | null)?.name))
+      .filter((n): n is string => typeof n === 'string' && /\.csv$/i.test(n) && !n.startsWith('.')).length
+  } catch { return 0 }
+}
+
 export async function knowledgeStats($: EngineInterface, given?: string[]): Promise<KnowStats | undefined> {
   const { root, md, entries: e } = await loadIndex($)
   if (md === undefined) return undefined
@@ -190,6 +199,7 @@ export async function knowledgeStats($: EngineInterface, given?: string[]): Prom
     bytes: bytesOf(md),
     coverage: coverage(e, await trackedFiles($, root, given)),
     stale: stale(e, p => ok.has(p)).length,
+    tables: await countTables($, root),
     last: await readLast($),
   }
 }

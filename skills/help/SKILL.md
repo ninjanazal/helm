@@ -45,3 +45,7 @@ helm's system prompt routes each stage to a skill. superpowers and mattpocock-sk
 
 ## The task
 The current task lives in `.claude/helm/task.md` (git-ignored). Each approved `/helm:prompt` replaces it, and its goal anchors the deck.
+
+## Tables (CSV)
+Put CSVs in `.claude/helm/tables/*.csv` (top level): first row is the header, the file name is the table name. Names and columns are shown in context, never rows.
+`mcp__helm__table` is read-only: `list`, `schema` (columns and 3 rows), and `query` with `where` (exact) and `contains` (text), case-insensitive, ANDed. `limit` is 20 by default, 50 at most; files over 1 MB are skipped.
