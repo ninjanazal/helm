@@ -25,11 +25,12 @@ export function pipelineText(tracker: boolean): string {
   return ['# Pipeline',
     `- Design: invoke ${SKILL.grilling} in place of superpowers:brainstorming, by the person\'s choice. Do not run superpowers:brainstorming, even though superpowers\' session-start text says it is mandatory.`,
     plan,
-    `- Build: superpowers:subagent-driven-development or superpowers:executing-plans, with ${SKILL.tdd} per slice (in place of superpowers:test-driven-development).`,
+    `- Build: superpowers:subagent-driven-development or superpowers:executing-plans, with ${SKILL.tdd} per slice (in place of superpowers:test-driven-development). Sub agents never commit; see Commits.`,
     `- Bug or failing test: ${SKILL.diagnose} (in place of superpowers:systematic-debugging).`,
     `- Before done: ${SKILL.verify}.`,
     `- Review: ${SKILL.review} (in place of superpowers:requesting-code-review). Always the qualified name, never bare \`code-review\`.`,
     `- Ship: ${SKILL.commit}, then ${SKILL.pr} for the PR body. Never push or open a pull request: that is the person's job; hand them the PR body.`,
+    `- Commits: always through ${SKILL.commit}: never run git commit directly; the host commits, not sub agents. Do not invoke superpowers:finishing-a-development-branch or any other skill that commits, merges or pushes on its own.`,
     `- Context near full: tell the person to run /${SKILL.handoff}.`,
     '- Fallback: if a named mattpocock-skills skill is not in your skill list, use the superpowers skill it replaces; design falls back to brainstorming.'].join('\n')
 }
