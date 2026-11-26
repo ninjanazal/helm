@@ -5,6 +5,6 @@
 .claude/teams/*/files/
 .superpowers/
 .claude/helm/*
-!.claude/helm/knowledge/
 __pycache__/
 bench/results.jsonl
+GLOSSARY.md

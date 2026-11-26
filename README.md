@@ -43,6 +43,13 @@ rm -rf .claude/helm/tasks .claude/helm/team.json
 
 `/helm:map [topic]` writes a short index of the repo into `.claude/helm/knowledge/index.md`: one line per top-level area with up to three paths and a note on what it is for. Glossary terms go to the repo's `GLOSSARY.md` and the vision to `vision.md`, both linked, never copied. The index is injected at session start (capped at 60 lines or 4 KB) and says "Check this index before searching; read linked files only when relevant." Entries whose path is gone are dropped from the injected index, not deleted. It is plain Markdown built by the model, with no server, no embeddings and no new dependencies.
 
+## 📄 Tables (CSV)
+
+Put CSVs in `.claude/helm/tables/*.csv` (top level): first row is the header, the file name is the table name. Names and columns are shown in context, never rows.
+`mcp__helm__table` is read-only: `list`, `schema` (columns and 3 rows), and `query` with `where` (exact match) and `contains` (text), both case-insensitive and ANDed.
+`limit` is 20 by default, 50 at most. Files over 1 MB are skipped.
+Example: `{action:'query', table:'people', where:{city:'Porto'}}`
+
 ## 🧭 Deck
 
 - `/helm:switch` opens the pane; `/helm:switch on|off` turns helm (the deck and lean mode) on or off for the project; off survives `/clear` and new sessions. Each approved `/helm:prompt` re-anchors the task and resets drift.

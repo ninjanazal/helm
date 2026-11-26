@@ -6,6 +6,7 @@ import { advisorSet } from './advisor'
 import { testingSet } from './testing'
 import { KNOW_READ, KNOW_WRITE, knowledgeSet } from './knowledge'
 import { deckOpenNow, deckReset, deckSet, deckTask } from './deck'
+import { tableTool } from './tables'
 
 /**
  * helm's tools. Each /helm:<verb> skill calls one of these and shows its text as is: the tool does the work,
@@ -101,6 +102,23 @@ export async function registerHelmTools($: EngineInterface): Promise<void> {
     isDeferred: false,
   })
   await $.tool.register({
+    name: 'table',
+    description: 'Read CSV tables in .claude/helm/tables (read-only). action: list, schema (table), query (table, where, contains, columns, limit)',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['list', 'schema', 'query'] },
+        table: { type: 'string' },
+        where: { type: 'object' },
+        contains: { type: 'object' },
+        columns: { type: 'array', items: { type: 'string' } },
+        limit: { type: 'number' },
+      },
+    },
+    isDeferred: false,
+  })
+  await $.tool.register({
     name: 'set_task',
     description:
       'Saves the approved prompt as the current task (.claude/helm/task.md) and sets the deck task to its goal. ' +
@@ -139,6 +157,7 @@ export async function handleHelmTool($: EngineInterface, tool: string, args: Rec
   if (tool === 'mcp__helm__advisor') return toolText(await advisorSet($, str(args.action)))
   if (tool === 'mcp__helm__testing') return toolText(await testingSet($, str(args.action)))
   if (tool === 'mcp__helm__knowledge') return toolText(await knowledgeSet($, args))
+  if (tool === 'mcp__helm__table') return toolText(await tableTool($, args))
   if (tool === 'mcp__helm__set_task') {
     const prompt = str(args.prompt)?.trim()
     const goal = str(args.goal)?.trim()

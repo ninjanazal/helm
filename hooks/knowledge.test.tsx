@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { KNOW_READ, KNOW_WRITE, capIndex, coverage, formatIndex, knowledgeSet, knowledgeSection, parseIndex, removeEntry, stale, upsert } from './knowledge'
+import { KNOW_READ, KNOW_WRITE, capIndex, coverage, formatIndex, knowledgeSet, knowledgeSection, knowledgeStats, parseIndex, removeEntry, stale, upsert } from './knowledge'
 
 const e = (topic: string, ...paths: string[]) => ({ topic, paths, note: 'n' })
 
@@ -165,4 +165,13 @@ test('knowledge: last access is recorded and shown by status', async () => {
   expect((store['knowledge.last'] as { op: string }).op).toBe('write')
   expect(KNOW_READ).toEqual(['status', 'stale'])
   expect(KNOW_WRITE).toEqual(['add', 'remove', 'vision', 'term'])
+})
+
+test('knowledge: stats count csv tables, ignoring dotfiles and other files; 0 when list throws', async () => {
+  const files = { '/p/.claude/helm/knowledge/index.md': '# Knowledge index\n' }
+  const $ = fake(files) as never as { fs: { list: unknown } }
+  $.fs.list = async () => ['a.csv', { name: 'B.CSV' }, '.x.csv', 'a.txt']
+  expect((await knowledgeStats($ as never))!.tables).toBe(2)
+  $.fs.list = async () => { throw new Error('ENOENT') }
+  expect((await knowledgeStats($ as never))!.tables).toBe(0)
 })

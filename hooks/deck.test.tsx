@@ -712,18 +712,20 @@ test('skills section: auto suggestions render ⚡, manual ones →', () => {
   expect(rows.some(r => r.startsWith('→ mattpocock-skills:pr · committed'))).toBe(true)
 })
 
-test('knowStrip: lit cell for 2000 ms, label with stale, empty without stats or rows', () => {
-  const stats = { entries: 12, bytes: 3174, coverage: 50, stale: 0 }
-  const row = (l: ReturnType<typeof knowStrip>, i = 0) => l[i]!.map(s => s.t).join('')
-  const lit = (l: ReturnType<typeof knowStrip>) => l[0]!.filter(s => s.bg && s.bg !== 'subtle').map(s => s.t.trim())
-  expect(lit(knowStrip({ stats, op: 'read', at: 1000 }, 2500, 40, KNOW_ROWS))).toEqual(['read'])
-  expect(lit(knowStrip({ stats, op: 'write', at: 1000 }, 2500, 40, KNOW_ROWS))).toEqual(['write'])
+test('knowStrip: one row, lit cell for 2000 ms, label, empty without stats or rows', () => {
+  const stats = { entries: 12, bytes: 3174, coverage: 50, stale: 0, tables: 3 }
+  const text = (l: ReturnType<typeof knowStrip>) => l[0]!.map(s => s.t).join('')
+  const bg = (l: ReturnType<typeof knowStrip>) => l[0]!.find(s => s.t === ' ≡ know ')!.bg
+  expect(KNOW_ROWS).toBe(1)
+  expect(knowStrip({ stats, op: 'read', at: 1000 }, 2500, 40, KNOW_ROWS)).toHaveLength(1)
+  expect(bg(knowStrip({ stats, op: 'read', at: 1000 }, 2500, 40, KNOW_ROWS))).toBe('suggestion')
+  expect(bg(knowStrip({ stats, op: 'write', at: 1000 }, 2500, 40, KNOW_ROWS))).toBe('warning')
   const idle = knowStrip({ stats, op: 'read', at: 1000 }, 3000, 40, KNOW_ROWS)
-  expect(lit(idle)).toEqual([])
-  expect(row(idle)).toContain('▱')
-  expect(idle[0]!.some(s => s.bg === 'subtle' && s.t.includes('knowledge'))).toBe(true)
-  expect(row(idle, 1).trim()).toBe('12 entries · 3.1 KB · 50% covered')
-  expect(row(knowStrip({ stats: { ...stats, stale: 2 } }, 0, 50, KNOW_ROWS), 1).trim()).toBe('12 entries · 3.1 KB · 50% covered · 2 stale')
+  expect(bg(idle)).toBe('subtle')
+  expect(text(idle).trim()).toBe('≡ know  12 topics · 3 tables · 50%')
+  expect(text(knowStrip({ stats: { ...stats, stale: 2 } }, 0, 60, KNOW_ROWS)).trim()).toBe('≡ know  12 topics · 3 tables · 50% · 2 stale')
+  expect(text(knowStrip({ stats: { ...stats, tables: 0 } }, 0, 60, KNOW_ROWS))).not.toContain('tables')
+  expect(text(knowStrip({ stats: { ...stats, entries: 0, tables: 0 } }, 0, 60, KNOW_ROWS)).trim()).toBe('≡ know  empty')
   expect(knowStrip({}, 0, 40, KNOW_ROWS)).toEqual([])
   expect(knowStrip({ stats }, 0, 40, KNOW_ROWS - 1)).toEqual([])
 })
