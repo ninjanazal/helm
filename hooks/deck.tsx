@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import { DRIFT_AT, PANE_FRAME_MS, PIPE_ROWS, TEST_RE, addCtx, addFive, addSkill, skillCommand, keepLimits, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, layout, live, pipeline, terms, tokenSplit, toolPhase, topicShift, verdict } from './deck-core'
+import { COMMIT_RE, DRIFT_AT, PANE_FRAME_MS, PIPE_ROWS, TEST_RE, addCtx, addFive, addSkill, skillCommand, keepLimits, agentDone, applyStep, applyTodo, deck, drift, isDeckOn, layout, live, pipeline, terms, tokenSplit, toolPhase, topicShift, verdict } from './deck-core'
 import type { DeckData, FeedItem, Phase, StepUsage } from './deck-core'
 import type { DeckDone, DeckState } from '../types'
 import { readLevel } from './lean'
@@ -104,6 +104,11 @@ function view(s: DeckState): DeckData {
     running,
     tracker,
   }
+}
+
+/** The deck's live data, as the pane sees it. */
+export async function deckData($: EngineInterface): Promise<DeckData> {
+  return view(await read($, state_))
 }
 
 export const registerDeck: Register = on => {
@@ -309,7 +314,7 @@ export async function deckTool($: EngineInterface, e: { tool: string; agentId?: 
       if (TEST_RE.test(cmd)) {
         const m = TEST_RE.exec(cmd)![0]
         f = { kind: 'test', text: m, note: err ? 'failed' : 'passed', tone: err ? 'bad' : 'good' }
-      } else f = { kind: 'run', text: cmd.split('\n')[0]!.slice(0, 40), note: err ? 'exit≠0' : undefined, tone: err ? 'bad' : undefined }
+      } else f = { kind: 'run', text: cmd.split('\n')[0]!.slice(0, 40), note: err ? 'exit≠0' : COMMIT_RE.test(cmd) ? 'commit' : undefined, tone: err ? 'bad' : undefined }
     } else if (tool === 'TodoWrite' || tool === 'TaskCreate' || tool === 'TaskUpdate') {
       if (!err) await set($, s => ({ ...s, todos: applyTodo(s.todos ?? [], tool, input, JSON.stringify(r)) }))
     } else if (tool === 'Agent' || tool === 'Task') {

@@ -14,7 +14,7 @@ export const SKILL = {
   grilling: 'mattpocock-skills:grilling', grillMe: 'mattpocock-skills:grill-me', toSpec: 'mattpocock-skills:to-spec',
   toTickets: 'mattpocock-skills:to-tickets', tdd: 'mattpocock-skills:tdd', diagnose: 'mattpocock-skills:diagnosing-bugs',
   review: 'mattpocock-skills:code-review', pr: 'mattpocock-skills:pr', handoff: 'mattpocock-skills:handoff',
-  verify: 'superpowers:verification-before-completion', commit: 'helm:commit',
+  verify: 'superpowers:verification-before-completion', commit: 'helm:commit', writingPlans: 'superpowers:writing-plans',
 } as const
 
 /** The section text. The plan stage depends on whether the issue tracker is set up. */

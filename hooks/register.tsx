@@ -1,10 +1,12 @@
-import { helmIsOn, deckCleared, deckMeasure, deckOpen, deckPrompt, deckStart, deckStep, deckTool, deckToolStart, deckTurnDone, registerDeck } from './deck'
+import { helmIsOn, deckCleared, deckData, deckMeasure, deckOpen, deckPrompt, deckStart, deckStep, deckTool, deckToolStart, deckTurnDone, registerDeck } from './deck'
 import type { Register } from 'claude-code'
 import { leanText, readLevel, LEAN_ID } from './lean'
 import { WORKLOAD_ID, workloadSection } from './workload'
 import { ADVISOR_ID, advisorSection } from './advisor'
 import { PIPELINE_ID, pipelineSection } from './pipeline'
 import { TESTING_ID, testingSection } from './testing'
+import { autoSkillText } from './autoskill'
+import { suggestSkills } from './deck-core'
 import { handleHelmTool, registerHelmTools, toolArgs } from './tools'
 
 const HELM_SECTIONS = new Set([LEAN_ID, WORKLOAD_ID, TESTING_ID, ADVISOR_ID, PIPELINE_ID])
@@ -57,7 +59,9 @@ export const register: Register = (on, options) => {
 
   on('prompt.submit', async ($, e, next) => {
     await deckPrompt($, e)
-    return next(e)
+    let text = ''
+    try { text = helmIsOn() ? autoSkillText(suggestSkills(await deckData($), Date.now())) : '' } catch { /* display only */ }
+    return next(text ? { ...e, context: [...(e.context ?? []), text] } : e)
   }).catch(($, e, next) => next(e))
 
   on('turn.step', async function* ($, e, next) {

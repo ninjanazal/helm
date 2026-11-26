@@ -87,8 +87,11 @@ export function skillCommand(text: string, known?: Iterable<string>): string | u
   return n.includes(':') || (known && new Set(known).has(n)) ? n : undefined
 }
 
-/** A skill that fits what the session is doing now, or none. First matching rule wins; used skills are skipped. */
-export function suggestSkill(d: DeckData, now: number): { name: string; why: string } | undefined {
+/** Skills helm runs on its own (the model is told to invoke them), as against ones the person types. */
+export const AUTO_SKILLS = new Set<string>([SKILL.verify, SKILL.diagnose, SKILL.review, SKILL.tdd, SKILL.writingPlans])
+
+/** Skills that fit what the session is doing now, in priority order, at most 3. Used skills are skipped. */
+export function suggestSkills(d: DeckData, now: number): { name: string; why: string; auto: boolean }[] {
   const t0 = d.taskAt ?? -Infinity
   const latest = (k: FeedItem['kind']) => d.feed.filter(f => f.kind === k && f.at >= t0).reduce<FeedItem | undefined>((a, f) => (!a || f.at >= a.at ? f : a), undefined)
   const test = latest('test'), edit = latest('edit')
@@ -98,18 +101,31 @@ export function suggestSkill(d: DeckData, now: number): { name: string; why: str
   if (run && d.running && run.at >= (d.skillsSince ?? Infinity)) used.add(run.name)
   const reviewed = d.skills?.some(s => s.name === SKILL.review && s.at > (edit?.at ?? t0))
   const checksPass = test?.tone === 'good' && (d.changes?.files ?? 0) > 0
+  const usedSince = (n: string) => (d.skills ?? []).some(s => s.name === n && s.at >= t0)
   const grilledSinceTask = (d.skills ?? []).some(s => [SKILL.grilling, SKILL.grillMe].includes(s.name) && s.at >= t0)
+  const committed = d.feed.some(f => f.kind === 'run' && f.at >= t0 && f.note === 'commit')
+  const ctxPct = d.ctx ? (d.ctx.percent ?? (d.ctx.tokens ? (100 * d.ctx.tokens) / d.ctx.window : 0)) : 0
   const cands: [boolean, string, string][] = [
     [test?.tone === 'bad', SKILL.diagnose, 'tests failing'],
     [d.feed.filter(f => f.kind === 'run' && f.note === 'exit≠0' && f.at >= since && f.at >= t0).length >= 2, SKILL.diagnose, 'commands failing'],
+    [ctxPct >= 80, SKILL.handoff, 'context near full'],
     [!!edit && (!test || edit.at > test.at), SKILL.verify, 'edited, not verified'],
     [checksPass && !reviewed, SKILL.review, 'checks pass, unreviewed'],
     [checksPass && !!reviewed, SKILL.commit, 'checks pass, uncommitted'],
-    [!!d.tracker && grilledSinceTask && !edit && !(d.skills ?? []).some(s => s.name === SKILL.toSpec && s.at >= t0), SKILL.toSpec, 'grilled, no spec yet'],
+    [!!d.tracker && grilledSinceTask && !edit && !usedSince(SKILL.toSpec), SKILL.toSpec, 'grilled, no spec yet'],
     [!!d.task && !edit && !(d.skills ?? []).some(s => s.at >= t0), SKILL.grillMe, 'new task, not grilled'],
+    [grilledSinceTask && !d.tracker && !edit && !usedSince(SKILL.writingPlans), SKILL.writingPlans, 'grilled, no plan yet'],
+    [!!edit && !test, SKILL.tdd, 'building, no test yet'],
+    [committed, SKILL.pr, 'committed, no PR body'],
   ]
-  for (const [ok, name, why] of cands) if (ok && !used.has(name)) return { name, why }
-  return undefined
+  const out: { name: string; why: string; auto: boolean }[] = []
+  const anchor = Math.max(edit?.at ?? -Infinity, test?.at ?? -Infinity, t0)
+  for (const [ok, name, why] of cands) {
+    const ranSince = AUTO_SKILLS.has(name) && (d.skills ?? []).some(s => s.name === name && s.at >= anchor)
+    if (ok && !used.has(name) && !ranSince && !out.some(o => o.name === name)) out.push({ name, why, auto: AUTO_SKILLS.has(name) })
+    if (out.length === 3) break
+  }
+  return out
 }
 
 // ── numbers ───────────────────────────────────────────────
@@ -534,10 +550,11 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
     const sk = d.skills ?? []
     const newest = sk.at(-1)
     const running = !!newest && d.running && newest.at >= (d.skillsSince ?? Infinity)
-    const sug = suggestSkill(d, now)
     const rows: Line[] = []
     if (running) rows.push([{ t: '▸ ', c: 'claude' }, { t: newest!.name, c: 'claude', b: true }])
-    if (sug) rows.push([{ t: '→ ', c: 'suggestion' }, { t: sug.name, c: 'suggestion', b: true }, { t: ' · ' + sug.why, d: true }])
+    for (const sug of suggestSkills(d, now)) rows.push(sug.auto
+      ? [{ t: '⚡ ', c: 'success' }, { t: sug.name, c: 'success', b: true }, { t: ' · auto · ' + sug.why, d: true }]
+      : [{ t: '→ ', c: 'suggestion' }, { t: sug.name, c: 'suggestion', b: true }, { t: ' · ' + sug.why, d: true }])
     for (const s of sk.slice(0, running ? -1 : undefined).slice(-3).reverse()) rows.push([{ t: `${s.name} · ${fmtDur(Math.max(0, now - s.at))}`, d: true }])
     if (rows.length) sec('skills', '✦ SKILLS', running ? 'claude' : 'suggestion', rows)
   }
@@ -569,6 +586,9 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
   if (tk.total > 0) tail.push(narrow
     ? [{ t: '↓', c: 'suggestion' }, { t: fmtTok(tk.in) }, { t: ' ' }, { t: '↑', c: 'suggestion' }, { t: fmtTok(tk.out) }]
     : [{ t: '↓ ', c: 'suggestion' }, { t: fmtTok(tk.in) }, { t: ' in', d: true }, sep, { t: '↑ ', c: 'suggestion' }, { t: fmtTok(tk.out) }, { t: ' out', d: true }])
+  if ((d.delegated ?? 0) > 0) tail.push(narrow
+    ? [{ t: '⌁', c: 'claude' }, { t: fmtTok(d.delegated!) }]
+    : [{ t: '⌁ ', c: 'claude' }, { t: fmtTok(d.delegated!) }, { t: ' agents', d: true }])
   if (tail.length) {
     const line: Line = tail.flatMap((l, i) => (i ? [sep, ...l] : l))
     body.push([{ t: ' '.repeat(Math.max(0, ((w - 1) - len(line)) >> 1)) }, ...line])
@@ -582,8 +602,9 @@ export function deck(d: DeckData, w: number, frame: number, now: number): Sectio
     const sorted = [...running, ...ag.filter(a => a.endedAt !== undefined).reverse()]
     const shown = sorted.slice(0, MAX_AGENT_ROWS)
     const rows = shown.map(a => agentRow(a, w, frame, d.running, now))
-    if (sorted.length > shown.length) rows.push([{ t: `+${sorted.length - shown.length} more`, d: true }])
-    const meta = [running.length ? `${running.length} running` : '', fmtTok(ag.reduce((n, a) => n + a.tokens, 0))].filter(Boolean).join(' · ')
+    const total = d.delegated ?? ag.reduce((n, a) => n + a.tokens, 0)
+    if (sorted.length > shown.length) rows.push([{ t: `+${sorted.length - shown.length} more · ${fmtTok(Math.max(0, total - shown.reduce((n, a) => n + a.tokens, 0)))}`, d: true }])
+    const meta = [running.length ? `${running.length} running` : '', `${fmtTok(total)} total`].filter(Boolean).join(' · ')
     sec('agents', '⌁ AGENTS', 'claude', rows, running.length > 0, meta)
   }
 
@@ -680,6 +701,8 @@ export const PANE_FRAME_MS = 120
 
 // ── pipeline: you → model → tools, drawn in the pane's free rows ──
 
+/** A new `git commit` anywhere in a command, not an amend. */
+export const COMMIT_RE = /\bgit\s+commit\b(?![^\n;&|]*--amend)/
 export const TEST_RE = /\b(make (test|check)|npm (run )?test|pnpm test|yarn test|bun test|cargo test|pytest|go test|claude plugin test)\b/
 
 /** What the session is doing: the model writing, a tool running, a dialog waiting on the person, or nothing. */
